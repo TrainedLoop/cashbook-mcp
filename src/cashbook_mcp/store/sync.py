@@ -426,7 +426,9 @@ class Syncer:
             ],
         )
 
-    async def add_connection(self, alias: str, item_id: str) -> Connection:
+    async def add_connection(self, alias: str, item_id: str, *, load: bool = True) -> Connection:
+        """Validate and store a connection, then run its first load (unless load=False, for a
+        caller that starts the load in the background itself)."""
         if not isinstance(alias, str) or not ALIAS_RE.fullmatch(alias):
             raise ValidationError("alias_invalid")
         self._check_free(alias, item_id)
@@ -448,7 +450,8 @@ class Syncer:
                     *status.values(),
                 ],
             )
-        await self.load(alias)
+        if load:
+            await self.load(alias)
         conn = self._connection(alias)
         if conn is None:  # disconnected while loading
             raise LookupError(f"connection {alias!r} was removed during its first load")

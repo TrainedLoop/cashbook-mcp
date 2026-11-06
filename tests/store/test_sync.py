@@ -420,3 +420,16 @@ async def test_preview_masks_numbers(syncer, fake):
         {"name": "Checking", "type": "BANK", "number": "****2345"},
         {"name": "Card", "type": "CREDIT", "number": "****4321"},
     ]
+
+
+async def test_add_connection_without_load_stores_only_the_connection(syncer, fake, db):
+    fake.add_item("item-a")
+    fake.add_tx("item-a-bank", "tx-1", "2026-10-01")
+    conn = await syncer.add_connection("a", "item-a", load=False)
+
+    assert conn.alias == "a" and conn.last_synced_at is None
+    assert fake.calls == [("get_item", "item-a")]
+    assert alias_counts(db, "a")["transactions"] == 0
+    assert alias_counts(db, "a")["connections"] == 1
+    assert (await syncer.load("a")).outcome == "ok"
+    assert alias_counts(db, "a")["transactions"] == 1

@@ -19,6 +19,8 @@ from starlette.requests import Request
 from starlette.responses import JSONResponse
 
 from cashbook_mcp import prompts
+from cashbook_mcp.admin_web.api import AdminContext, admin_routes
+from cashbook_mcp.admin_web.identity import GoogleIdentity
 from cashbook_mcp.analysis import listing
 from cashbook_mcp.analysis.filters import TxFilters, today_in
 from cashbook_mcp.analysis.overview import finance_overview as _finance_overview
@@ -400,11 +402,8 @@ def _utc_now() -> datetime:
 
 
 def build_app(settings: Settings, secrets: Secrets) -> tuple[FastMCP, AppContext]:
-    """Open the store and wire the Pluggy client, syncer, scheduler, auth and MCP server.
-
-    Further HTTP routes (the admin page) are registered on the returned server with
-    `mcp.custom_route`, using the returned context.
-    """
+    """Open the store and wire the Pluggy client, syncer, scheduler, auth, MCP server and the
+    admin page (sign-in, JSON API and SPA under /admin)."""
     db = Database.open(settings.db_path, secrets.db_key)
     pluggy = PluggyClient(secrets.pluggy_client_id, secrets.pluggy_client_secret)
     syncer = Syncer(
@@ -417,7 +416,28 @@ def build_app(settings: Settings, secrets: Secrets) -> tuple[FastMCP, AppContext
         db=db, syncer=syncer, tz=settings.tz, now=_utc_now, scheduler=scheduler,
         auth=build_auth(settings, secrets), cleanup=pluggy.aclose,
     )  # fmt: skip
+    register_admin(mcp, context)
     return mcp, context
+
+
+def register_admin(mcp: FastMCP, context: AppContext) -> None:
+    """Add the /admin routes to the server's HTTP app; /health and the MCP endpoint are unaffected."""
+    admin = AdminContext(
+        settings=context.settings,
+        secrets=context.secrets,
+        syncer=context.syncer,
+        scheduler=context.scheduler,
+        db=context.db,
+        pluggy=context.pluggy,
+        identity=GoogleIdentity(context.secrets.google_client_id, context.secrets.google_client_secret),
+    )
+    for route in admin_routes(admin):
+        # methods=None (every method) reaches the admin fallback, which answers 404/405 itself.
+        mcp.custom_route(
+            route.path,
+            methods=sorted(route.methods) if route.methods else None,  # type: ignore[arg-type]
+            include_in_schema=False,
+        )(route.endpoint)
 
 
 def allowed_hosts(settings: Settings) -> list[str]:

@@ -10,6 +10,8 @@ dependencies = [
     "duckdb>=2.0,<2.1",
     "httpx>=0.28",
     "pytz>=2026.6",
+    "google-auth>=2.35",
+    "requests>=2.32",
 ]
 
 [build-system]

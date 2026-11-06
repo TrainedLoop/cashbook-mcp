@@ -322,6 +322,15 @@ def test_build_app_wires_everything(tmp_path):
         assert all(v not in repr(context) for v in ("psecret", "gsecret", KEY, "k" * 64))
         assert allowed_hosts(settings) == ["owner.example.ts.net", "localhost", "127.0.0.1"]
         # Without the lifespan (no scheduler run, no Pluggy call) nothing has loaded yet.
-        assert TestClient(mcp.http_app()).get("/health").json() == {"ok": True, "loaded": False}
+        client = TestClient(mcp.http_app())
+        assert client.get("/health").json() == {"ok": True, "loaded": False}
+        # The admin routes are wired: the API answers signed out, with the security headers.
+        resp = client.get("/admin/api/session")
+        assert resp.status_code == 401 and resp.json() == {"error": "signed_out"}
+        assert resp.headers["x-frame-options"] == "DENY"
+        login = client.get("/admin/auth/login", follow_redirects=False)
+        assert login.status_code == 303
+        assert "redirect_uri=https%3A%2F%2Fowner.example.ts.net%2Fadmin%2Fauth%2Fcallback" in login.headers["location"]
+        assert client.put("/admin/api/session").status_code == 405
     finally:
         context.db.close()

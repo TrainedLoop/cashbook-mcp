@@ -1,0 +1,40 @@
+from datetime import UTC, date, datetime
+from zoneinfo import ZoneInfo
+
+from cashbook_mcp.analysis.filters import today_in
+from cashbook_mcp.analysis.overview import finance_overview
+
+SP = ZoneInfo("America/Sao_Paulo")
+
+
+def test_month_boundary_tz(db, add_row):
+    assert today_in(SP, datetime(2026, 4, 1, 3, 30, tzinfo=UTC)) == date(2026, 4, 1)
+    assert today_in(SP, datetime(2026, 4, 1, 2, 30, tzinfo=UTC)) == date(2026, 3, 31)
+    add_row("t-apr", "main", "acc-main", date(2026, 4, 1), "-10.00", "Padaria", "purchase",
+            category="Groceries")  # fmt: skip
+    today = today_in(SP, datetime(2026, 4, 1, 3, 30, tzinfo=UTC))
+    mtd = finance_overview(db, today)["month_to_date"]
+    assert mtd == {"income": "0.00", "spending": "10.00", "net": "-10.00"}
+    march = finance_overview(db, date(2026, 3, 31))["month_to_date"]
+    assert march["spending"] == "408.20"
+
+
+def test_overview_bills_due_window(db):
+    ov = finance_overview(db, date(2026, 4, 1), days_ahead=9)
+    assert [b["id"] for b in ov["bills_due"]] == ["bill-soon", "bill-edge"]
+    assert ov["bills_due"][0]["total_amount"] == "300.00"
+    narrow = finance_overview(db, date(2026, 4, 1), days_ahead=3)
+    assert narrow["bills_due"] == []
+
+
+def test_overview_shape(db, today):
+    ov = finance_overview(db, today)
+    assert [a["id"] for a in ov["accounts"]] == ["acc-main", "acc-second"]
+    assert [c["id"] for c in ov["cards"]] == ["card-main"]
+    assert ov["month_to_date"] == {
+        "income": "5000.00", "spending": "408.20", "net": "4591.80",
+    }  # fmt: skip
+    assert len(ov["top_categories"]) <= 5
+    assert ov["connections_with_problems"] == [
+        {"alias": "second", "status": "LOGIN_ERROR", "error": "boom"}
+    ]

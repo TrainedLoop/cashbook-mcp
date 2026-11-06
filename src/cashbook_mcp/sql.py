@@ -32,6 +32,12 @@ TIMEOUT_S = 10
 
 MAX_SQL_BYTES = 100 * 1024
 MAX_CELL_CHARS = 8192
+MAX_COLUMNS = 100
+# Upper bound on the characters DuckDB holds for the capped result: the cell
+# cap and row limit shrink with the number of variable-size columns so the
+# whole LIMIT result stays under it (DuckDB builds it before the first fetch).
+MAX_MATERIALIZED_CHARS = 64 * 1024 * 1024
+MIN_CELL_CHARS = 1024
 MAX_RESULT_BYTES = 4 * 1024 * 1024
 TRUNCATED_SUFFIX = "…[truncated]"
 
@@ -121,7 +127,14 @@ class QueryResult:
     suspicious_cells: list[tuple[int, str]] = field(default_factory=list)
 
 
-def _clean_message(message: str) -> str:
+_CONTEXT_RE = re.compile(r"\n\s*LINE \d+:.*", re.DOTALL)
+
+
+def _clean_message(message: str, *, runtime: bool = False) -> str:
+    if runtime:
+        # The LINE context would quote the sandbox wrapper, not the agent's SQL.
+        message = _CONTEXT_RE.sub("", message)
+        message = message.replace(_SUBQUERY_ALIAS, "query")
     message = _PATH_RE.sub("<path>", message)
     message = " ".join(message.split())
     if len(message) > _MAX_MESSAGE_CHARS:
@@ -279,11 +292,46 @@ def _bounded_sql(sql: str, statement: dict) -> str:
     raise SqlRejected("syntax", "the query cannot be run in the sandbox")
 
 
-def _capped_select(types: list[str]) -> tuple[str, list[str]]:
+def _limits(types: list[str], max_rows: int) -> tuple[int, int]:
+    """(cell cap in characters, row limit) keeping the result materializable."""
+    variable = sum(1 for t in types if not _FIXED_TYPES.fullmatch(t))
+    if variable == 0:
+        return MAX_CELL_CHARS, max_rows
+    per_cell = MAX_MATERIALIZED_CHARS // ((max_rows + 1) * variable)
+    cap = min(MAX_CELL_CHARS, max(MIN_CELL_CHARS, per_cell))
+    rows = min(max_rows, max(1, MAX_MATERIALIZED_CHARS // (variable * cap) - 1))
+    return cap, rows
+
+
+def _describe_sql(inner: str) -> str:
+    return f"DESCRIBE\n{inner}\n"
+
+
+def _is_describe_of(described: str, statement: dict) -> bool:
+    """True if described is DESCRIBE over a query identical to statement."""
+    try:
+        tree = _parse(described)
+    except SqlRejected:
+        return False
+    statements = tree.get("statements") or []
+    if len(statements) != 1:
+        return False
+    node = statements[0].get("node") or {}
+    ref = node.get("from_table") or {}
+    query = ref.get("query")  # the query node itself, not a statement
+    return (
+        node.get("type") == "SELECT_NODE"
+        and ref.get("type") == "SHOW_REF"
+        and ref.get("show_type") == "DESCRIBE"
+        and _strip_locations(query) == _strip_locations(statement.get("node"))
+        and not _violations(statements)
+    )
+
+
+def _capped_select(types: list[str], cap: int) -> tuple[str, list[str]]:
     """Outer select list capping variable-size values; returns (sql, plan)."""
     exprs: list[str] = []
     plan: list[str] = []
-    cap = MAX_CELL_CHARS
     for i, type_name in enumerate(types):
         col = f"c{i}"
         if _FIXED_TYPES.fullmatch(type_name):
@@ -330,7 +378,7 @@ def _flagged(value: object) -> bool:
     return has_marker(value)
 
 
-def _row_cells(raw: tuple, plan: list[str]) -> tuple[list, bool]:
+def _row_cells(raw: tuple, plan: list[str], cap: int) -> tuple[list, bool]:
     """Undo the capping columns of one fetched row; return (cells, any_cut)."""
     cells: list = []
     cut = False
@@ -342,8 +390,8 @@ def _row_cells(raw: tuple, plan: list[str]) -> tuple[list, bool]:
         elif kind == "text":
             value = raw[j]
             j += 1
-            if isinstance(value, str) and len(value) > MAX_CELL_CHARS:
-                value = value[:MAX_CELL_CHARS] + TRUNCATED_SUFFIX
+            if isinstance(value, str) and len(value) > cap:
+                value = value[:cap] + TRUNCATED_SUFFIX
                 cut = True
             cells.append(value)
         else:
@@ -366,9 +414,11 @@ def run_query(
 ) -> QueryResult:
     """Run one read-only SELECT. Raises SqlRejected on rejection, error or timeout.
 
-    Results are bounded: at most max_rows rows, text cells of at most
-    MAX_CELL_CHARS characters, and at most MAX_RESULT_BYTES of JSON in total.
-    Any of these cuts sets truncated.
+    Results are bounded: at most MAX_COLUMNS columns (else "too_wide"), at most
+    max_rows rows, text cells of at most MAX_CELL_CHARS characters, and at most
+    MAX_RESULT_BYTES of JSON in total. With many variable-size columns the cell
+    cap and row limit shrink so DuckDB's materialized result stays under
+    MAX_MATERIALIZED_CHARS. Any cut sets truncated.
     """
     if not isinstance(sql, str):
         raise SqlRejected("syntax", "sql must be a string")
@@ -383,12 +433,25 @@ def run_query(
         try:
             cur.execute("BEGIN")
             try:
-                cur.execute(_wrap(inner, "*", "", 0))
-                description = cur.description or []
-                types = [str(d[1]) for d in description]
-                select_list, plan = _capped_select(types)
+                # Names and types without running the query; DESCRIBE keeps
+                # the agent's column names (a subquery would rename duplicates).
+                described = _describe_sql(inner)
+                if not _is_describe_of(described, statement):
+                    raise SqlRejected(
+                        "syntax", "the query cannot be run in the sandbox"
+                    )
+                columns_info = cur.execute(described).fetchall()
+                names = [str(r[0]) for r in columns_info]
+                types = [str(r[1]) for r in columns_info]
+                if len(names) > MAX_COLUMNS:
+                    raise SqlRejected(
+                        "too_wide",
+                        f"{len(names)} columns; at most {MAX_COLUMNS} are allowed",
+                    )
+                cap, row_limit = _limits(types, max_rows)
+                select_list, plan = _capped_select(types, cap)
                 aliases = "(" + ", ".join(f"c{i}" for i in range(len(types))) + ")"
-                bounded = _wrap(inner, select_list or "*", aliases, max_rows + 1)
+                bounded = _wrap(inner, select_list or "*", aliases, row_limit + 1)
                 if not _is_wrapper_of(bounded, statement):
                     raise SqlRejected(
                         "syntax", "the query cannot be run in the sandbox"
@@ -403,10 +466,10 @@ def run_query(
                     if not batch:
                         break
                     for raw in batch:
-                        if len(rows) == max_rows:
+                        if len(rows) == row_limit:
                             full = True
                             break
-                        cells, cut = _row_cells(raw, plan)
+                        cells, cut = _row_cells(raw, plan, cap)
                         size = _size(cells) + 1
                         if total + size > MAX_RESULT_BYTES:
                             full = True
@@ -415,7 +478,7 @@ def run_query(
                         total += size
                         rows.append(cells)
                 truncated = truncated or full
-                outcome["columns"] = [d[0] for d in description]
+                outcome["columns"] = names
                 outcome["types"] = types
                 outcome["rows"] = rows
                 outcome["truncated"] = truncated
@@ -449,7 +512,7 @@ def run_query(
     if "rejected" in outcome:
         raise outcome["rejected"] from None
     if "error" in outcome:
-        raise SqlRejected("error", _clean_message(str(outcome["error"])))
+        raise SqlRejected("error", _clean_message(str(outcome["error"]), runtime=True))
 
     columns = outcome["columns"]
     rows = outcome["rows"]

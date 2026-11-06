@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 import time
 from datetime import datetime
 from decimal import Decimal
@@ -12,6 +14,7 @@ from cashbook_mcp import schema_doc
 from cashbook_mcp.content import MARK_CLOSE, MARK_OPEN
 from cashbook_mcp.sql import (
     MAX_CELL_CHARS,
+    MAX_COLUMNS,
     MAX_RESULT_BYTES,
     MAX_ROWS,
     MAX_SQL_BYTES,
@@ -515,7 +518,10 @@ def test_wrapping_keeps_query_semantics(db):
     ordered = run_query(db, "SELECT range AS n FROM range(5000) ORDER BY hash(range)")
     expected = db.read().execute("SELECT range FROM range(5000) ORDER BY hash(range)")
     assert [r[0] for r in ordered.rows] == [r[0] for r in expected.fetchmany(1000)]
-    assert run_query(db, "SELECT 1 AS a, 2 AS a").rows == [[1, 2]]
+    dup = run_query(db, "SELECT 1 AS a, 2 AS a, 'x' AS a")
+    assert dup.rows == [[1, 2, "x"]]
+    assert dup.columns == ["a", "a", "a"]
+    assert dup.types == ["INTEGER", "INTEGER", "VARCHAR"]
 
 
 def test_wrapper_check_detects_mismatch():
@@ -589,3 +595,77 @@ def test_duckdb_function_snapshot():
         "Re-review the allow/deny lists in cashbook_mcp/sql.py, then regenerate "
         "tests/fixtures/duckdb_functions.json with CASHBOOK_UPDATE_FUNCTION_SNAPSHOT=1."
     )
+
+
+def test_runtime_errors_do_not_expose_wrapper(db):
+    for sql in [
+        "SELECT CAST('abc' AS INTEGER) AS x",
+        "SELECT 1/0::INTEGER AS x, error('boom') AS y",
+        "SELECT * FROM range(3) WHERE CAST('z' AS INTEGER) > range",
+    ]:
+        with pytest.raises(SqlRejected) as exc:
+            run_query(db, sql)
+        message = str(exc.value)
+        assert "__cb_q" not in message
+        assert "LINE " not in message
+        assert exc.value.reason == "error"
+
+
+def test_too_wide(db):
+    assert MAX_COLUMNS == 100
+    cols = ", ".join(f"{i} AS c{i}" for i in range(101))
+    with pytest.raises(SqlRejected) as exc:
+        run_query(db, f"SELECT {cols}")
+    assert exc.value.reason == "too_wide"
+    ok = ", ".join(f"{i} AS c{i}" for i in range(100))
+    assert len(run_query(db, f"SELECT {ok}").columns) == 100
+
+
+def test_normal_wide_query_keeps_all_rows(db):
+    cols = ", ".join(
+        [f"range + {i} AS n{i}" for i in range(5)]
+        + [f"'text ' || range::VARCHAR || ' {i}' AS t{i}" for i in range(5)]
+    )
+    result = run_query(db, f"SELECT {cols} FROM range(500)")
+    assert len(result.rows) == 500
+    assert result.truncated is False
+    assert result.rows[499][5] == "text 499 0"
+    full = run_query(
+        db, "SELECT *, repeat('d', 400) AS description2 FROM range(1000) r, v_accounts"
+    )
+    assert full.rows == []
+
+
+_RSS_SCRIPT = """
+import json, resource, sys, tempfile, pathlib
+from cashbook_mcp.store.db import Database
+from cashbook_mcp.sql import run_query
+ncols = int(sys.argv[1])
+db = Database.open(pathlib.Path(tempfile.mkdtemp()) / "x.duckdb", "ab" * 32)
+cols = ", ".join(f"repeat(chr(97 + {i} % 26), 8192 + range * 0) AS c{i}" for i in range(ncols))
+sql = f"SELECT {cols} FROM range(1001)"
+run_query(db, "SELECT 1")
+before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+result = run_query(db, sql)
+after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+size = len(json.dumps(result.rows, ensure_ascii=False).encode())
+print(json.dumps({"growth_mb": (after - before) / 1024, "truncated": result.truncated,
+                  "rows": len(result.rows), "bytes": size}))
+"""
+
+
+@pytest.mark.parametrize("ncols", [1, 50, 100])
+def test_wide_result_memory_is_bounded(ncols):
+    out = subprocess.run(
+        [sys.executable, "-c", _RSS_SCRIPT, str(ncols)],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
+    )
+    stats = json.loads(out.stdout.strip().splitlines()[-1])
+    print(ncols, stats)
+    assert stats["truncated"] is True
+    assert stats["rows"] >= 1
+    assert stats["bytes"] < 5 * 1024 * 1024
+    assert stats["growth_mb"] < 300, stats

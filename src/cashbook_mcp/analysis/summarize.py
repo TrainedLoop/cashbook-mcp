@@ -34,6 +34,9 @@ def _aggregate(db: Database, f: TxFilters, group_by: str) -> dict[str, dict]:
     # excluded) unless the caller asks for inflows or specific kinds.
     base = "v_transactions" if (f.direction == "in" or f.kinds) else "v_spending"
     where, params = where_clause(f)
+    if base == "v_transactions" and "investment" not in (f.kinds or []):
+        # Same exclusion as cash_flow, so income figures agree.
+        where = f"{where} AND kind != 'investment'" if where else "WHERE kind != 'investment'"
     sql = (
         f"SELECT {_GROUP_EXPR[group_by]} AS k, abs(sum(amount)), count(*), "
         f"min(date), max(date) FROM {base} {where} GROUP BY 1"
@@ -84,16 +87,28 @@ def summarize_transactions(
         ordered = sorted(current.values(), key=lambda g: g["key"])
     else:
         ordered = sorted(current.values(), key=lambda g: (-g["total"], g["key"]))
+    # Time groupings pair periods by ordinal offset (first with first, ...);
+    # other groupings match by key.
+    if group_by in _PERIOD_EXPR:
+        prev_keys = sorted(previous)
+        prev_key = {
+            g["key"]: prev_keys[i] for i, g in enumerate(ordered) if i < len(prev_keys)
+        }
+    else:
+        prev_key = {g["key"]: g["key"] for g in ordered}
     groups = []
     for g in ordered:
         out = {k: jsonable(v) for k, v in g.items()}
         if compare_previous:
-            p = previous.get(g["key"])
-            out["previous"] = (
+            p = previous.get(prev_key[g["key"]]) if g["key"] in prev_key else None
+            block = (
                 {k: jsonable(p[k]) for k in ("total", "count", "average")}
                 if p
                 else {"total": str(_ZERO), "count": 0, "average": str(_ZERO)}
             )
+            if group_by in _PERIOD_EXPR:
+                block["previous_key"] = prev_key.get(g["key"])
+            out["previous"] = block
         groups.append(out)
     return {"groups": groups, "period": period}
 

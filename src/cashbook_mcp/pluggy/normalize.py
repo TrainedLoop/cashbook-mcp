@@ -62,13 +62,21 @@ def _account(alias: str, a: dict) -> Account:
 
 
 def _transaction(alias: str, account: Account, t: dict) -> Transaction:
-    in_account = t.get("amountInAccountCurrency")
-    amount = _req_dec(in_account if in_account is not None else t.get("amount"))
-    if account.type == "CREDIT":
-        amount *= CARD_AMOUNT_SIGN
+    sign = CARD_AMOUNT_SIGN if account.type == "CREDIT" else 1
     tx_currency = t.get("currencyCode") or account.currency
     foreign = tx_currency != account.currency
-    original_amount = _dec(t.get("amount")) if foreign else None
+    in_account = t.get("amountInAccountCurrency")
+    if foreign and in_account is None:
+        # No conversion given: keep the amount in its own currency and label it
+        # so, rather than passing a foreign figure off as the account currency.
+        amount = _req_dec(t.get("amount")) * sign
+        currency = tx_currency
+    else:
+        amount = _req_dec(in_account if in_account is not None else t.get("amount")) * sign
+        currency = account.currency
+    # Same sign convention as amount (negative = money out).
+    original = _dec(t.get("amount")) if foreign else None
+    original_amount = original * sign if original is not None else None
 
     payment = t.get("paymentData") or {}
     party = payment.get("receiver" if amount < 0 else "payer") or {}
@@ -80,7 +88,7 @@ def _transaction(alias: str, account: Account, t: dict) -> Transaction:
         account_id=account.id,
         date=_date(t["date"]),  # type: ignore[arg-type]
         amount=amount,
-        currency=account.currency,
+        currency=currency,
         original_amount=original_amount,
         original_currency=tx_currency if foreign else None,
         description=t.get("description") or t.get("descriptionRaw") or "",

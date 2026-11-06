@@ -41,7 +41,7 @@ def test_rows_are_json_safe(db):
     row = search_transactions(db, TxFilters(text="github"))["rows"][0]
     assert row["amount"] == "-52.30"
     assert row["date"] == "2026-03-12"
-    assert row["original_amount"] == "10.00"
+    assert row["original_amount"] == "-10.00"
     assert row["suspicion_reasons"] == []
 
 

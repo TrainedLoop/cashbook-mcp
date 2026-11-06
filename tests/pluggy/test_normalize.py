@@ -59,7 +59,8 @@ def test_foreign_currency_uses_account_currency():
     t = tx(snapshot(), "tx-card-2")
     assert t.amount == Decimal("-55.5")
     assert t.currency == "BRL"
-    assert t.original_amount == Decimal("10.0")
+    # Same sign convention as amount: a card purchase is money out.
+    assert t.original_amount == Decimal("-10.0")
     assert t.original_currency == "USD"
 
 
@@ -68,7 +69,7 @@ def test_foreign_currency_example_from_brief():
     extra.update(id="tx-fx", amount=10.00, amountInAccountCurrency=55.30, currencyCode="USD")
     t = tx(snapshot([extra]), "tx-fx")
     assert t.amount == Decimal("-55.30")
-    assert t.original_amount == Decimal("10.00")
+    assert t.original_amount == Decimal("-10.00")
     assert t.original_currency == "USD"
 
 
@@ -129,3 +130,21 @@ def test_accounts_and_others():
     assert s.loans[0].installments_total == 36
     assert s.loans[0].installments_remaining == 16
     assert (s.fetched_from, s.fetched_to) == (date(2025, 11, 1), date(2026, 11, 6))
+
+
+def test_foreign_currency_without_conversion_keeps_its_currency():
+    extra = dict(load("transactions_page2.json")["results"][1])
+    extra.pop("amountInAccountCurrency", None)
+    extra.update(id="tx-fx-raw", amount=10.00, currencyCode="USD")
+    t = tx(snapshot([extra]), "tx-fx-raw")
+    # Not converted: the amount is in USD and says so, never mislabeled as BRL.
+    assert (t.amount, t.currency) == (Decimal("-10.00"), "USD")
+    assert (t.original_amount, t.original_currency) == (Decimal("-10.00"), "USD")
+
+
+def test_bank_foreign_original_amount_keeps_bank_sign():
+    extra = dict(load("transactions_page1.json")["results"][0])
+    extra.update(id="tx-bank-fx", amount=-20.00, amountInAccountCurrency=-110.00, currencyCode="USD")
+    t = tx(snapshot([extra]), "tx-bank-fx")
+    assert (t.amount, t.currency) == (Decimal("-110.00"), "BRL")
+    assert t.original_amount == Decimal("-20.00")

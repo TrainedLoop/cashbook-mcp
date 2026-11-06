@@ -104,7 +104,7 @@ def db(tmp_path):
         # USD purchase, already converted to BRL.
         add_tx(cur, "t-usd", "main", "card-main", date(2026, 3, 12), "-52.30",
                "GITHUB INC", "purchase", category="Software", merchant="GitHub",
-               original="10.00", original_currency="USD")  # fmt: skip
+               original="-10.00", original_currency="USD")  # fmt: skip
     yield database
     database.close()
 

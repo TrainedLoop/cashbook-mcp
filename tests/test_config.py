@@ -75,3 +75,13 @@ def test_bad_db_key_raises(tmp_path, bad):
     (tmp_path / "db.key").write_text(bad)
     with pytest.raises(ConfigError, match="db.key"):
         load_secrets(tmp_path)
+
+
+def test_secrets_repr_hides_values():
+    from cashbook_mcp.config import Secrets
+
+    values = ("pid-VAL", "psecret-VAL", "gid-VAL", "gsecret-VAL", "ab" * 32, "sess-VAL" * 8)
+    s = Secrets(*values)
+    for v in values:
+        assert v not in repr(s)
+        assert v not in str(s)

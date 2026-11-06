@@ -4,7 +4,7 @@ import json
 import os
 import re
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import time
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -64,12 +64,13 @@ class Settings:
 
 @dataclass(frozen=True)
 class Secrets:
-    pluggy_client_id: str
-    pluggy_client_secret: str
-    google_client_id: str
-    google_client_secret: str
-    db_key: str
-    session_key: str
+    # repr=False everywhere: a logged or traced Secrets must not leak values.
+    pluggy_client_id: str = field(repr=False)
+    pluggy_client_secret: str = field(repr=False)
+    google_client_id: str = field(repr=False)
+    google_client_secret: str = field(repr=False)
+    db_key: str = field(repr=False)
+    session_key: str = field(repr=False)
 
 
 def load_secrets(secrets_dir: Path) -> Secrets:

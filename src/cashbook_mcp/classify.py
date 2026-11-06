@@ -69,6 +69,19 @@ def _classify_one(
     credit_inflow = account is not None and account.type == "CREDIT" and t.amount > 0
     if credit_inflow and kind == "card_bill_payment":
         return replace(t, kind="card_bill_payment", kind_reason="card_payment_received")
+    if credit_inflow:
+        # The card side of a bill payment often carries no Pluggy category;
+        # match it against this card's own bills so it is not taken as income.
+        for b in bills:
+            start = b.closing_date or (b.due_date - _BEFORE_DUE)
+            if (
+                b.account_id == t.account_id
+                and abs(t.amount - b.total_amount) <= _TOLERANCE
+                and start <= t.date <= b.due_date + _AFTER_DUE
+            ):
+                return replace(
+                    t, kind="card_bill_payment", kind_reason=f"matched_card_bill:{b.id}"
+                )
 
     if t.counterpart_account_number in numbers:
         alias = numbers[t.counterpart_account_number]

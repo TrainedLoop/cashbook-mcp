@@ -112,3 +112,28 @@ def test_pure_and_ordered():
     out = classify([a, b], ACCOUNTS, [])
     assert [t.id for t in out] == ["t1", "t2"]
     assert a == replace(a) and a.kind == "other"
+
+
+def card_bill(id="cb1", due=date(2026, 3, 12), total="500.00", closing=None, account_id="c1"):
+    return Bill(id, "main", account_id, due, closing, Decimal(total), None, "BRL")
+
+
+def test_uncategorized_card_payment_matches_bill():
+    t = tx(amount="500.00", account_id="c1", d=date(2026, 3, 10))
+    r = one(t, [card_bill()])
+    assert (r.kind, r.kind_reason) == ("card_bill_payment", "matched_card_bill:cb1")
+
+
+def test_card_payment_window_uses_closing_date():
+    b = card_bill(closing=date(2026, 3, 5))
+    assert one(tx(amount="500.00", account_id="c1", d=date(2026, 3, 5)), [b]).kind == "card_bill_payment"
+    assert one(tx(amount="500.00", account_id="c1", d=date(2026, 3, 17)), [b]).kind == "card_bill_payment"
+    assert one(tx(amount="500.00", account_id="c1", d=date(2026, 3, 4)), [b]).kind == "refund"
+    assert one(tx(amount="500.00", account_id="c1", d=date(2026, 3, 18)), [b]).kind == "refund"
+
+
+def test_card_payment_needs_bill_of_same_account():
+    other = card_bill(account_id="c2")
+    assert one(tx(amount="500.00", account_id="c1", d=date(2026, 3, 10)), [other]).kind == "refund"
+    near = card_bill(total="500.02")
+    assert one(tx(amount="500.00", account_id="c1", d=date(2026, 3, 10)), [near]).kind == "refund"

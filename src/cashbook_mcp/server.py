@@ -370,12 +370,14 @@ def create_mcp(
         "Guided review of one month (YYYY-MM): overview, cash flow, categories compared with the previous "
         "period, and recurring charges."
     ))(prompts.monthly_review)  # fmt: skip
-    mcp.prompt(name="subscriptions_audit", description="Audit recurring charges and subscriptions.")(
-        prompts.subscriptions_audit
-    )
-    mcp.prompt(name="upcoming_bills", description="Bills and expected charges due in the next `days` days.")(
-        prompts.upcoming_bills
-    )
+    # Dates are rendered server-side from the configured timezone, so the agent never has to guess "today".
+    @mcp.prompt(name="subscriptions_audit", description="Audit recurring charges and subscriptions.")
+    def subscriptions_audit() -> str:
+        return prompts.subscriptions_audit(today=today())
+
+    @mcp.prompt(name="upcoming_bills", description="Bills and expected charges due in the next `days` days.")
+    def upcoming_bills(days: int = 15) -> str:
+        return prompts.upcoming_bills(days, today=today())
 
     @mcp.custom_route("/health", methods=["GET"], include_in_schema=False)
     async def health(request: Request) -> JSONResponse:

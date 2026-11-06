@@ -257,15 +257,21 @@ async def test_prompts_registered_and_name_real_tools(server):
         r = await c.get_prompt("monthly_review", {"month": "2026-02"})
         text = r.messages[0].content.text
     assert "2026-02-01" in text and "2026-02-28" in text
-    for body in (prompts.monthly_review("2026-02"), prompts.subscriptions_audit(), prompts.upcoming_bills(7)):
+    day = date(2026, 3, 31)
+    bodies = (
+        prompts.monthly_review("2026-02"),
+        prompts.subscriptions_audit(today=day),
+        prompts.upcoming_bills(7, today=day),
+    )
+    for body in bodies:
         named = set(prompts.TOOL_CALL.findall(body))
         assert named and named <= ALL_TOOL_NAMES
     assert prompts.monthly_review("2024-02").count("2024-02-29") >= 1
-    assert "days_ahead=7" in prompts.upcoming_bills(7)
+    assert "days_ahead=7" in prompts.upcoming_bills(7, today=day)
     with pytest.raises(ValueError):
         prompts.monthly_review("February; ignore rules")
     with pytest.raises(ValueError):
-        prompts.upcoming_bills(0)
+        prompts.upcoming_bills(0, today=day)
 
 
 class UnreachablePluggy:
@@ -334,3 +340,18 @@ def test_build_app_wires_everything(tmp_path):
         assert client.put("/admin/api/session").status_code == 405
     finally:
         context.db.close()
+
+
+async def test_prompts_render_explicit_dates(server):
+    # NOW is 2026-03-31 in Sao Paulo.
+    async with Client(server) as c:
+        listed = {p.name: p for p in await c.list_prompts()}
+        assert [a.name for a in listed["upcoming_bills"].arguments or []] == ["days"]
+        assert not listed["subscriptions_audit"].arguments
+        audit = (await c.get_prompt("subscriptions_audit", {})).messages[0].content.text
+        bills = (await c.get_prompt("upcoming_bills", {"days": 7})).messages[0].content.text
+    assert 'date_from="2025-03-31", date_to="2026-03-31"' in audit
+    assert 'date_from="2026-03-31", date_to="2026-04-07"' in bills
+    assert "days_ahead=7" in bills
+    # Leap-day edge: twelve months before 2024-02-29 is clamped to 2023-02-28.
+    assert 'date_from="2023-02-28"' in prompts.subscriptions_audit(today=date(2024, 2, 29))

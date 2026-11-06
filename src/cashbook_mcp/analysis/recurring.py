@@ -1,6 +1,5 @@
 """Recurring charge/income candidates inferred from transaction history."""
 
-import calendar
 import re
 from datetime import date, timedelta
 from decimal import Decimal
@@ -11,7 +10,7 @@ from typing import Literal
 from cashbook_mcp.content import MARK_CLOSE, MARK_OPEN, wrap_suspicious
 from cashbook_mcp.store.db import Database
 
-from .filters import INTERNAL_KINDS, jsonable
+from .filters import INTERNAL_KINDS, jsonable, months_ago
 
 Confidence = Literal["high", "medium", "low"]
 
@@ -28,12 +27,6 @@ _NOISE = re.compile(r"[\d*]+")
 def _normalize_key(text: str) -> str:
     text = _MARKERS.sub(" ", text).lower()
     return " ".join(_NOISE.sub(" ", text).split())
-
-
-def _months_ago(today: date, months: int) -> date:
-    idx = today.year * 12 + (today.month - 1) - months
-    year, month = idx // 12, idx % 12 + 1
-    return date(year, month, min(today.day, calendar.monthrange(year, month)[1]))
 
 
 def _cluster(rows: list[tuple]) -> list[tuple]:
@@ -72,7 +65,7 @@ def find_recurring(
     )
     cur = db.read()
     try:
-        fetched = cur.execute(sql, [_months_ago(today, months), today, *INTERNAL_KINDS]).fetchall()
+        fetched = cur.execute(sql, [months_ago(today, months), today, *INTERNAL_KINDS]).fetchall()
     finally:
         cur.close()
 

@@ -1,5 +1,6 @@
 """Transaction filters and their parameterized SQL translation."""
 
+import calendar
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -32,6 +33,13 @@ def today_in(tz: ZoneInfo, now: datetime) -> date:
     if now.tzinfo is None:
         now = now.replace(tzinfo=UTC)
     return now.astimezone(tz).date()
+
+
+def months_ago(today: date, months: int) -> date:
+    """Same day `months` calendar months earlier, clamped to the month's last day."""
+    idx = today.year * 12 + (today.month - 1) - months
+    year, month = idx // 12, idx % 12 + 1
+    return date(year, month, min(today.day, calendar.monthrange(year, month)[1]))
 
 
 def _in(column: str, values: list[str], clauses: list[str], params: list[Any]) -> None:

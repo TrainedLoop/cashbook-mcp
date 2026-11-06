@@ -54,3 +54,12 @@ async def test_allowlist(monkeypatch, claims, ok):
     prov = AllowlistGoogleProvider.__new__(AllowlistGoogleProvider)
     prov.allowed_emails = frozenset({"me@example.com"})
     assert (await prov.load_access_token("t") is not None) is ok
+
+
+def test_build_auth_creates_oauth_state_dir_under_fastmcp_home(tmp_path, monkeypatch):
+    import fastmcp
+
+    home = tmp_path / "data" / "fastmcp"
+    monkeypatch.setattr(fastmcp.settings, "home", home)
+    build_auth(settings(), SECRETS)
+    assert (home / "oauth-proxy").is_dir()

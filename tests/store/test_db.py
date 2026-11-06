@@ -207,3 +207,21 @@ def test_all_views_exist(db):
         "v_investment_transactions", "v_loans", "v_spending",
     ]:
         assert cur.execute(f"SELECT count(*) FROM {view}").fetchone() == (0,)
+
+
+def test_open_never_autoinstalls_extensions(tmp_path, monkeypatch):
+    # An empty extension directory: httpfs is missing, and open must fail
+    # instead of downloading it (the container has no writable $HOME).
+    empty = tmp_path / "ext"
+    empty.mkdir()
+    monkeypatch.setenv("DUCKDB_EXTENSION_DIR", str(empty))
+    with pytest.raises(DatabaseOpenError, match="httpfs"):
+        Database.open(tmp_path / "cashbook.duckdb", KEY)
+    assert list(empty.iterdir()) == []
+    assert not (tmp_path / "cashbook.duckdb").exists()
+
+
+def test_open_disables_extension_autoload(db):
+    cur = db.read()
+    for name in ("autoinstall_known_extensions", "autoload_known_extensions"):
+        assert cur.execute(f"SELECT current_setting('{name}')").fetchone() == (False,)

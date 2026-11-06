@@ -62,6 +62,30 @@ def _attach(conn: duckdb.DuckDBPyConnection, path: Path, key: str) -> None:
         raise DatabaseOpenError(f"cannot open database: {error}")
 
 
+def _load_crypto(conn: duckdb.DuckDBPyConnection) -> None:
+    """Load httpfs (OpenSSL crypto, needed to write encrypted files) explicitly.
+
+    Extensions are never installed or loaded implicitly: the image ships httpfs
+    in a fixed directory (DUCKDB_EXTENSION_DIR) and the container has no
+    writable $HOME to install into.
+    """
+    ext_dir = os.environ.get("DUCKDB_EXTENSION_DIR")
+    error: str | None = None
+    try:
+        if ext_dir:
+            conn.execute(f"SET extension_directory = {_quote(ext_dir)}")
+        conn.execute("SET autoinstall_known_extensions = false")
+        conn.execute("SET autoload_known_extensions = false")
+        conn.execute("LOAD httpfs")
+    except duckdb.Error as e:
+        error = str(e)
+    if error is not None:
+        raise DatabaseOpenError(
+            "cannot load the httpfs extension (install it with INSTALL httpfs, "
+            f"or set DUCKDB_EXTENSION_DIR): {error}"
+        )
+
+
 def _detach(conn: duckdb.DuckDBPyConnection) -> None:
     conn.execute("CHECKPOINT")
     conn.execute("USE memory")
@@ -158,6 +182,7 @@ class Database:
         path = Path(path)
         conn = duckdb.connect(":memory:")
         try:
+            _load_crypto(conn)
             _attach(conn, path, key)
             _migrate(conn, path, key, migrations_dir)
             conn.execute("SET memory_limit='256MB'")

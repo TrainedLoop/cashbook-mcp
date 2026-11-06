@@ -21,6 +21,13 @@ COPY src/ ./src/
 COPY --from=web /build/src/cashbook_mcp/admin_web/static ./src/cashbook_mcp/admin_web/static
 RUN uv sync --frozen --no-dev
 
+# DuckDB needs httpfs (OpenSSL crypto) to write encrypted files. Install it at
+# build time into a fixed, world-readable directory: at runtime the server
+# never installs or autoloads extensions, and the user has no home directory.
+ENV DUCKDB_EXTENSION_DIR=/opt/duckdb-ext
+RUN /app/.venv/bin/python -c "import duckdb; c = duckdb.connect(); c.execute(\"SET extension_directory = '/opt/duckdb-ext'\"); c.execute('INSTALL httpfs'); c.execute('LOAD httpfs')" \
+    && chmod -R a+rX /opt/duckdb-ext
+
 RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin cashbook
 USER cashbook
 
@@ -28,7 +35,8 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     DB_PATH=/data/cashbook.duckdb \
     SECRETS_DIR=/secrets \
-    PORT=8743
+    PORT=8743 \
+    FASTMCP_HOME=/data/fastmcp
 
 EXPOSE 8743
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \

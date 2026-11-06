@@ -72,3 +72,22 @@ def test_no_personal_data_in_repo():
         text = path.read_text(errors="ignore")
         hits += [str(rel) for pat in FORBIDDEN if pat.search(text)]
     assert not hits, hits
+
+
+def test_dockerfile_keeps_fastmcp_state_on_the_data_volume():
+    # The OAuth proxy stores client registrations under FASTMCP_HOME; the image
+    # user has no home, so it must point at the persistent, writable volume.
+    text = (ROOT / "Dockerfile").read_text()
+    assert re.search(r"FASTMCP_HOME=/data/fastmcp\b", text)
+
+
+def test_dockerfile_ships_httpfs_and_disables_autoinstall_paths():
+    text = (ROOT / "Dockerfile").read_text()
+    assert "DUCKDB_EXTENSION_DIR=/opt/duckdb-ext" in text
+    assert "INSTALL httpfs" in text
+
+
+def test_ci_smoke_opens_database_in_the_image():
+    text = (ROOT / ".github/workflows/ci.yml").read_text()
+    assert "HOME=/nonexistent" in text
+    assert "Database.open" in text

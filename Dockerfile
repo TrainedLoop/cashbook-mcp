@@ -1,0 +1,36 @@
+# Base images are pinned by digest (multi-arch index); Dependabot bumps them.
+
+# Stage 1: build the admin SPA. vite writes to ../src/cashbook_mcp/admin_web/static,
+# which resolves to /build/src/cashbook_mcp/admin_web/static from /build/web.
+FROM node:22-slim@sha256:5ec23b7c622b00547753bc6ffd78085dd868a68aeb41c8e0a1418f033e13d96d AS web
+WORKDIR /build/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+COPY web/ ./
+RUN npm run build
+
+# Stage 2: the Python runtime. Node is not part of it.
+FROM python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
+
+COPY --from=ghcr.io/astral-sh/uv:0.12.12@sha256:73d2665b478d8fa2de1cf105c6841f8e9cb6b09e568fc7700440c09f8fcd7ac4 /uv /usr/local/bin/uv
+
+WORKDIR /app
+COPY pyproject.toml uv.lock README.md ./
+RUN uv sync --frozen --no-dev --no-install-project
+COPY src/ ./src/
+COPY --from=web /build/src/cashbook_mcp/admin_web/static ./src/cashbook_mcp/admin_web/static
+RUN uv sync --frozen --no-dev
+
+RUN useradd --uid 10001 --no-create-home --shell /usr/sbin/nologin cashbook
+USER cashbook
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONUNBUFFERED=1 \
+    DB_PATH=/data/cashbook.duckdb \
+    SECRETS_DIR=/secrets \
+    PORT=8743
+
+EXPOSE 8743
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
+    CMD ["python", "-c", "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:%s/health' % os.environ.get('PORT', '8743'), timeout=4)"]
+CMD ["cashbook-mcp"]

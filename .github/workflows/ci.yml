@@ -30,3 +30,10 @@ jobs:
       - run: npm --prefix web ci
       - run: npm --prefix web test
       - run: npm --prefix web run build
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: docker build -t cashbook-mcp:ci .
+      - run: docker run --rm cashbook-mcp:ci python -c "import cashbook_mcp.server"

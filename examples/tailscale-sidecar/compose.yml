@@ -1,0 +1,31 @@
+# Tailscale sidecar: the tailscale container joins the tailnet as its own machine
+# (https://cashbook.<tailnet>.ts.net) and the app shares its network namespace.
+# Nothing listens on the host. Use together with the root compose file:
+#   docker compose -f docker-compose.yml -f examples/tailscale-sidecar/compose.yml up -d
+# Paths are relative to the first -f file (the repo root). Needs TS_CERT_DOMAIN in .env
+# (the full hostname, e.g. cashbook.owner.example.ts.net).
+services:
+  tailscale:
+    image: tailscale/tailscale:stable
+    hostname: cashbook
+    restart: unless-stopped
+    mem_limit: 512m
+    environment:
+      TS_AUTHKEY_FILE: /secrets/ts-authkey
+      TS_STATE_DIR: /var/lib/tailscale
+      TS_SERVE_CONFIG: /config/serve.json
+      TS_CERT_DOMAIN: ${TS_CERT_DOMAIN}
+    volumes:
+      - tailscale-state:/var/lib/tailscale
+      - ./examples/tailscale-sidecar/serve.json:/config/serve.json:ro
+      - ./secrets:/secrets:ro
+
+  cashbook:
+    network_mode: service:tailscale
+    depends_on:
+      - tailscale
+    restart: unless-stopped
+    mem_limit: 512m
+
+volumes:
+  tailscale-state:

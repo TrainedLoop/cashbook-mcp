@@ -86,7 +86,7 @@ def test_list_categories(db):
 def test_in_summary_matches_cash_flow_income(db, add_row, today):
     add_row("t-redeem", "main", "acc-main", date(2026, 3, 25), "700.00", "Resgate",
             "investment")  # fmt: skip
-    res =     f_in = TxFilters(date_from=MARCH.date_from, date_to=MARCH.date_to, direction="in")
+    f_in = TxFilters(date_from=MARCH.date_from, date_to=MARCH.date_to, direction="in")
     groups = summarize_transactions(db, f_in, "kind", today=today)["groups"]
     total = sum(Decimal(g["total"]) for g in groups)
     flow = cash_flow(db, date(2026, 3, 1), date(2026, 3, 31))

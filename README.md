@@ -46,7 +46,9 @@ You need Docker, an HTTPS address for the server, a free Pluggy account and a Go
 ```bash
 mkdir -p data secrets && cp .env.example .env   # edit PUBLIC_URL and ALLOWED_EMAILS
 # put pluggy.json and google-oauth.json in secrets/, then:
-docker compose run --rm cashbook cashbook-admin init
+sudo chown -R 10001:10001 data secrets
+docker run --rm -v "$PWD/data:/data" -v "$PWD/secrets:/secrets" \
+  ghcr.io/trainedloop/cashbook-mcp:0.1 cashbook-admin init
 docker compose up -d
 ```
 

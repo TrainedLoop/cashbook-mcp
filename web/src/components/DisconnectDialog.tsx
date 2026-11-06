@@ -26,12 +26,16 @@ export default function DisconnectDialog({ alias, onClose, onDone }: Props) {
   }, [alias]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && !busy && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, busy]);
 
-  useEffect(() => input.current?.focus(), []);
+  useEffect(() => {
+    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    input.current?.focus();
+    return () => opener?.focus();
+  }, []);
 
   async function confirm() {
     setBusy(true);
@@ -78,7 +82,7 @@ export default function DisconnectDialog({ alias, onClose, onDone }: Props) {
         </label>
         {error && <p role="alert" className="error">{error}</p>}
         <div className="actions">
-          <button type="button" onClick={onClose}>Cancel</button>
+          <button type="button" onClick={onClose} disabled={busy}>Cancel</button>
           <button type="button" className="danger" disabled={!impact || typed !== alias || busy} onClick={confirm}>
             Disconnect
           </button>

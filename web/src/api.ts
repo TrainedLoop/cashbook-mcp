@@ -67,6 +67,13 @@ export function loginUrl(next: string): string {
 }
 
 let cached: SessionInfo | null = null;
+const unauthorized = new Set<() => void>();
+
+/** Call `cb` whenever the API answers 401 (the session expired). Returns an unsubscribe function. */
+export function onUnauthorized(cb: () => void): () => void {
+  unauthorized.add(cb);
+  return () => void unauthorized.delete(cb);
+}
 
 export function resetSession(): void {
   cached = null;
@@ -88,7 +95,10 @@ async function call<T>(method: string, path: string, body?: unknown, mutating = 
   }
   if (!res.ok) {
     const code = (data as { error?: string } | null)?.error ?? "unknown";
-    if (res.status === 401) cached = null;
+    if (res.status === 401) {
+      cached = null;
+      unauthorized.forEach((cb) => cb());
+    }
     if (res.status === 403 && code === "reauth_required") {
       window.location.assign(loginUrl(window.location.pathname + window.location.search));
     }

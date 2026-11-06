@@ -91,3 +91,35 @@ describe("disconnect dialog", () => {
     await waitFor(() => expect(assign).toHaveBeenCalledWith("/admin/auth/login?next=%2Fadmin"));
   });
 });
+
+describe("screen survives re-auth", () => {
+  it("opens the dialog for ?disconnect=<alias> and uses it as next on reauth", async () => {
+    const user = userEvent.setup();
+    window.history.pushState({}, "", "/admin?disconnect=nubank");
+    vi.stubGlobal("location", { pathname: "/admin", search: "?disconnect=nubank", assign });
+    disconnectReply = () => reply(403, { error: "reauth_required" });
+    render(<App />);
+    expect(await screen.findByRole("dialog")).toBeInTheDocument();
+    await user.type(screen.getByLabelText("Type nubank to confirm"), "nubank");
+    const buttons = screen.getAllByRole("button", { name: "Disconnect" });
+    await user.click(buttons[buttons.length - 1]);
+    await waitFor(() =>
+      expect(assign).toHaveBeenCalledWith("/admin/auth/login?next=%2Fadmin%3Fdisconnect%3Dnubank"),
+    );
+  });
+});
+
+describe("expired session", () => {
+  it("shows sign in when a call after the initial session returns 401", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) =>
+        url === "/admin/api/session"
+          ? reply(200, { email: "o@example.com", csrf: "t", reauth_fresh: true })
+          : reply(401, { error: "signed_out" }),
+      ),
+    );
+    render(<App />);
+    expect(await screen.findByRole("link", { name: "Continue with Google" })).toBeInTheDocument();
+  });
+});

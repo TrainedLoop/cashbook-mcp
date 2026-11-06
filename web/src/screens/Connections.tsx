@@ -8,20 +8,22 @@ export const POLL_MS = 3000;
 export const POLL_MAX_MS = 2 * 60 * 1000;
 
 interface Props {
+  disconnecting: string | null;
+  onDisconnect: (alias: string | null) => void;
   onConnect: () => void;
   onAddExisting: () => void;
 }
 
-export default function Connections({ onConnect, onAddExisting }: Props) {
+export default function Connections({ disconnecting, onDisconnect, onConnect, onAddExisting }: Props) {
   const [rows, setRows] = useState<Connection[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [disconnecting, setDisconnecting] = useState<string | null>(null);
   // Polling runs while something syncs, until this deadline; opening the screen and every reload extends it.
   const deadline = useRef(Date.now() + POLL_MAX_MS);
 
   const load = useCallback(async () => {
     try {
       setRows((await api.connections()).connections);
+      setError(null);
     } catch (e) {
       setError(errorMessage(e));
     }
@@ -86,7 +88,7 @@ export default function Connections({ onConnect, onAddExisting }: Props) {
               )}
               <div className="actions">
                 <button type="button" onClick={() => reload(c.alias)} disabled={c.syncing}>Reload now</button>
-                <button type="button" className="danger-outline" onClick={() => setDisconnecting(c.alias)}>Disconnect</button>
+                <button type="button" className="danger-outline" onClick={() => onDisconnect(c.alias)}>Disconnect</button>
               </div>
             </li>
           ))}
@@ -99,9 +101,9 @@ export default function Connections({ onConnect, onAddExisting }: Props) {
       {disconnecting && (
         <DisconnectDialog
           alias={disconnecting}
-          onClose={() => setDisconnecting(null)}
+          onClose={() => onDisconnect(null)}
           onDone={() => {
-            setDisconnecting(null);
+            onDisconnect(null);
             void load();
           }}
         />

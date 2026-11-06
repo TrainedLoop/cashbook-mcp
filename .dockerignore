@@ -1,0 +1,15 @@
+.env
+secrets/
+data/
+.superpowers/
+.git
+.github
+.venv
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+node_modules
+web/node_modules
+web/dist
+src/cashbook_mcp/admin_web/static
+tests/

@@ -1,0 +1,4 @@
+{"total":2,"totalPages":1,"page":1,"results":[
+{"id":"invtx-1","tradeDate":"2025-06-01T00:00:00.000Z","date":"2025-06-01T00:00:00.000Z","description":"Aplicacao CDB Exemplo","type":"BUY","quantity":1,"value":10000.0,"amount":10000.0,"netAmount":10000.0,"brokerageNumber":null,"expenses":{"tax":0,"issqnTax":0,"brokerageFee":0}},
+{"id":"invtx-2","tradeDate":"2026-10-01T00:00:00.000Z","date":"2026-10-01T00:00:00.000Z","description":"Rendimento CDB Exemplo","type":"TAX","quantity":null,"value":-12.5,"amount":-12.5,"netAmount":-12.5,"brokerageNumber":null,"expenses":{"tax":12.5,"issqnTax":0,"brokerageFee":0}}
+]}

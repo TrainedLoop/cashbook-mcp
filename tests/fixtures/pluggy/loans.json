@@ -1,0 +1,3 @@
+{"total":1,"totalPages":1,"page":1,"results":[
+{"id":"loan-1","itemId":"item-1","contractNumber":"CTR-0001","productName":"Credito Pessoal Exemplo","type":"PERSONAL","ipocCode":"0001","contractDate":"2025-03-01","dueDate":"2028-03-01","contractAmount":12000.0,"currencyCode":"BRL","installmentPeriodicity":"MONTHLY","installments":{"totalInstallments":36,"paidInstallments":20,"dueInstallments":16,"typeNumberOfInstallments":"MES"},"cet":0.021,"contractedFees":[],"warranties":[]}
+]}

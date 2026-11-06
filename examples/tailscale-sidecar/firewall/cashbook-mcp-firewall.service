@@ -1,0 +1,13 @@
+[Unit]
+Description=Firewall rules isolating the cashbook-mcp sidecar
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Adjust the path to where you installed the project on the host.
+ExecStart=/opt/cashbook-mcp/examples/tailscale-sidecar/firewall/cashbook-mcp-firewall.sh
+
+[Install]
+WantedBy=multi-user.target

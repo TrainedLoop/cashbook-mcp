@@ -1,0 +1,11 @@
+/data/
+/secrets/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+node_modules/
+web/dist/
+src/cashbook_mcp/admin_web/static/
+.env

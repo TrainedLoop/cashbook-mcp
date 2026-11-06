@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>cashbook-mcp: let an AI assistant read your finances, safely</title>
+<meta name="description" content="cashbook-mcp is a self-hosted, open-source, read-only MCP server that syncs your Brazilian bank accounts, cards and investments from Pluggy into an encrypted local database and lets an AI assistant query them.">
+<meta name="theme-color" content="#f4f7f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0d1714" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="canonical" href="https://trainedloop.github.io/cashbook-mcp/">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="cashbook-mcp">
+<meta property="og:title" content="cashbook-mcp: let an AI assistant read your finances, safely">
+<meta property="og:description" content="A self-hosted, read-only MCP server over your Pluggy financial data, kept in an encrypted local database. Open source, MIT.">
+<meta property="og:url" content="https://trainedloop.github.io/cashbook-mcp/">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-head">
+  <div class="wrap">
+    <a class="brand" href="./">cashbook-mcp</a>
+    <nav aria-label="Site">
+      <ul>
+        <li><a href="https://github.com/TrainedLoop/cashbook-mcp/blob/main/docs/tutorial.md">Tutorial</a></li>
+        <li><a href="https://github.com/TrainedLoop/cashbook-mcp/blob/main/SECURITY.md">Security</a></li>
+        <li><a href="https://github.com/TrainedLoop/cashbook-mcp">GitHub</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <div class="hero">
+    <div class="wrap">
+      <p class="status"><strong>Beta</strong> v0.1.0, open source under MIT</p>
+      <h1>Ask your assistant about your money. It can only read it.</h1>
+      <p class="lede">An MCP server you run yourself. It syncs your bank accounts, cards, investments and loans from Pluggy (through the free MeuPluggy connector, Brazilian Open Finance) into an encrypted database on your own disk, and lets Claude answer questions about spending, bills and recurring charges.</p>
+      <div class="actions">
+        <a class="btn btn-primary" href="https://github.com/TrainedLoop/cashbook-mcp/blob/main/docs/tutorial.md">Set it up</a>
+        <a class="btn btn-ghost" href="https://github.com/TrainedLoop/cashbook-mcp">GitHub</a>
+      </div>
+    </div>
+  </div>
+
+  <section class="band" aria-label="In short">
+    <div class="wrap">
+      <ul class="pillars">
+        <li>
+          <h2>Read-only, end to end</h2>
+          <p>The server never changes anything at Pluggy, and every tool only reads. The SQL tool accepts a single SELECT in a locked-down sandbox.</p>
+        </li>
+        <li>
+          <h2>Your data, your disk</h2>
+          <p>One DuckDB file, encrypted, with the key kept outside the data volume. History keeps growing past what Pluggy provides.</p>
+        </li>
+        <li>
+          <h2>Safe against hostile text</h2>
+          <p>Anyone can send you a PIX with a message. Transaction text is cleaned, capped and flagged, and the assistant is told it is data.</p>
+        </li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="block" id="tools">
+    <div class="wrap">
+      <h2>What the assistant can do</h2>
+      <div class="scroll">
+        <table>
+          <thead><tr><th>Tool</th><th>Purpose</th></tr></thead>
+          <tbody>
+            <tr><td><code>finance_overview</code></td><td>Balances, cards, upcoming bills, month to date, top categories, connection problems</td></tr>
+            <tr><td><code>search_transactions</code>, <code>get_transactions</code></td><td>Filtered, paginated search; full rows by id</td></tr>
+            <tr><td><code>summarize_transactions</code>, <code>cash_flow</code>, <code>find_recurring</code></td><td>Aggregations and recurring-charge candidates</td></tr>
+            <tr><td><code>list_bills</code>, <code>list_investments</code>, <code>list_loans</code></td><td>Cards, investments and loans</td></tr>
+            <tr><td><code>describe_schema</code>, <code>query_sql</code></td><td>The schema, and SELECT-only SQL over it</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>One owner per instance: only Google logins in <code>ALLOWED_EMAILS</code> get in. An owner page at <code>/admin</code> connects banks with MeuPluggy and works on a phone.</p>
+    </div>
+  </section>
+</main>
+
+<footer class="site-foot">
+  <div class="wrap">
+    <p>cashbook-mcp is beta software, released under the <a href="https://github.com/TrainedLoop/cashbook-mcp/blob/main/LICENSE">MIT license</a>.</p>
+    <ul>
+      <li><a href="https://github.com/TrainedLoop/cashbook-mcp">GitHub</a></li>
+      <li><a href="https://github.com/TrainedLoop/cashbook-mcp/blob/main/docs/tutorial.md">Tutorial</a></li>
+      <li><a href="https://github.com/TrainedLoop/cashbook-mcp/blob/main/docs/architecture.md">Architecture</a></li>
+      <li><a href="https://github.com/TrainedLoop/cashbook-mcp/blob/main/ROADMAP.md">Roadmap</a></li>
+      <li><a href="https://github.com/TrainedLoop/cashbook-mcp/blob/main/SECURITY.md">SECURITY.md</a></li>
+    </ul>
+    <p>Unofficial. Not affiliated with or endorsed by Pluggy, Anthropic or Google.</p>
+  </div>
+</footer>
+</body>
+</html>

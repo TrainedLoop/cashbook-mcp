@@ -309,7 +309,7 @@ All tools are read-only. Every response includes `data_as_of` per connection and
   - the app uses `network_mode: service:tailscale`;
   - a serve config publishes Funnel on 443 to the app;
   - the auth key goes in `secrets/`;
-  - nothing listens on the host. This replaces mailhub's loopback port + firewall unit pattern, and gives each service its own hostname on 443 instead of competing for Funnel's three ports.
+  - nothing is published on the host, but the container is still internet-facing: the sidecar sits on a fixed-subnet network isolated by a firewall unit, and runs Tailscale in userspace mode so the app has no route into the tailnet. This gives each service its own hostname on 443 instead of competing for Funnel's three ports.
 - **Secrets:**
   - `secrets/pluggy.json` (`clientId`, `clientSecret`);
   - `secrets/db.key`;

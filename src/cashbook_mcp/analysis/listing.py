@@ -5,7 +5,7 @@ from datetime import date
 from typing import Any
 
 from cashbook_mcp.models import Connection
-from cashbook_mcp.presenter import problem_of
+from cashbook_mcp.presenter import iso_utc, problem_of
 from cashbook_mcp.store.db import Database
 
 from .filters import jsonable
@@ -72,10 +72,10 @@ def list_connections(db: Database) -> list[dict]:
                 "status": c.status,
                 "execution_status": c.execution_status,
                 "error_code": c.error_code,
-                "last_updated_at": jsonable(c.last_updated_at),
-                "last_synced_at": jsonable(c.last_synced_at),
+                "last_updated_at": iso_utc(c.last_updated_at),
+                "last_synced_at": iso_utc(c.last_synced_at),
                 "last_sync_error": c.last_sync_error,
-                "consent_expires_at": jsonable(c.consent_expires_at),
+                "consent_expires_at": iso_utc(c.consent_expires_at),
                 "accounts": accounts.get(c.alias, []),
                 "history": {
                     "transactions": count,

@@ -39,7 +39,7 @@ def problem_of(conn: Connection) -> tuple[str, str] | None:
     return None
 
 
-def _iso_utc(value: datetime | None) -> str | None:
+def iso_utc(value: datetime | None) -> str | None:
     if value is None:
         return None
     if value.tzinfo is None:
@@ -69,7 +69,7 @@ def _clean(value: Any) -> tuple[Any, int]:
     if isinstance(value, Decimal):
         return (str(value) if value.is_finite() else None), 0
     if isinstance(value, datetime):
-        return _iso_utc(value), 0
+        return iso_utc(value), 0
     if isinstance(value, date):
         return value.isoformat(), 0
     return value, int(has_marker(value))
@@ -80,7 +80,7 @@ def present(payload: dict, connections: list[Connection], now: datetime) -> dict
     the suspicion marker, `suspicious_values` and `note`. Nothing in the payload is wrapped or rewritten.
     `now` is the response time, kept for call symmetry with the tools."""
     out, suspicious = _clean(payload)
-    out["data_as_of"] = {c.alias: _iso_utc(c.last_synced_at) for c in connections}
+    out["data_as_of"] = {c.alias: iso_utc(c.last_synced_at) for c in connections}
     problems = []
     for c in connections:
         found = problem_of(c)

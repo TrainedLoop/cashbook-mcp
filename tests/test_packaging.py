@@ -91,3 +91,13 @@ def test_ci_smoke_opens_database_in_the_image():
     text = (ROOT / ".github/workflows/ci.yml").read_text()
     assert "HOME=/nonexistent" in text
     assert "Database.open" in text
+
+
+def test_env_example_mentions_sidecar_cert_domain():
+    assert re.search(r"^# TS_CERT_DOMAIN=", (ROOT / ".env.example").read_text(), re.MULTILINE)
+
+
+def test_readme_quick_start_has_local_build_note():
+    text = (ROOT / "README.md").read_text()
+    quick = text[text.index("## Quick start") : text.index("## Development")]
+    assert "docker build -t cashbook-mcp:dev ." in quick

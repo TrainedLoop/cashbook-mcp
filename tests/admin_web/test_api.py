@@ -373,7 +373,7 @@ def test_connections_list_with_badges_and_no_raw_errors(env):
     assert set(rows) == {"main", "second", "third", "fourth"}
     assert rows["main"]["badge"] == "ok"
     assert rows["main"]["bank"] == "Bank A"
-    assert rows["main"]["last_synced_at"] == "2026-11-06T09:00:00"
+    assert rows["main"]["last_synced_at"] == "2026-11-06T09:00:00+00:00"
     assert rows["main"]["history"] == {"transactions": 1, "date_from": "2026-10-01", "date_to": "2026-10-01"}
     assert rows["main"]["accounts"][0]["name"] == "Checking"
     assert rows["second"]["badge"] == "login error" and rows["second"]["hint"]

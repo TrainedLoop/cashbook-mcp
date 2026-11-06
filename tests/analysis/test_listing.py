@@ -79,3 +79,16 @@ def test_investments_and_loans(db):
     assert loans[0]["id"] == "loan-1"
     assert loans[0]["next_due_date"] == "2026-04-15"
     assert list_loans(db, "main") == []
+
+
+def test_list_connections_timestamps_carry_utc_offset(db):
+    with db.write() as cur:
+        cur.execute(
+            "UPDATE connections SET last_synced_at = ?, last_updated_at = ?, consent_expires_at = ? "
+            "WHERE alias = 'main'",
+            [datetime(2026, 3, 31, 9, 0), datetime(2026, 3, 31, 8, 0), datetime(2026, 9, 1)],
+        )
+    main = {c["alias"]: c for c in list_connections(db)}["main"]
+    assert main["last_synced_at"] == "2026-03-31T09:00:00+00:00"
+    assert main["last_updated_at"] == "2026-03-31T08:00:00+00:00"
+    assert main["consent_expires_at"] == "2026-09-01T00:00:00+00:00"

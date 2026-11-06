@@ -52,6 +52,10 @@ docker run --rm -v "$PWD/data:/data" -v "$PWD/secrets:/secrets" \
 docker compose up -d
 ```
 
+> **Before the first release** the image is not published yet. Build it from this checkout with
+> `docker build -t cashbook-mcp:dev .`, use `cashbook-mcp:dev` in place of `ghcr.io/trainedloop/cashbook-mcp:0.1`
+> above, and point `image:` in `docker-compose.yml` at it.
+
 [examples/tailscale-sidecar/](examples/tailscale-sidecar/) shows a deployment where nothing listens on the host. [ROADMAP.md](ROADMAP.md) lists planned work.
 
 ## Development

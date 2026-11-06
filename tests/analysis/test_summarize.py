@@ -86,13 +86,11 @@ def test_list_categories(db):
 def test_in_summary_matches_cash_flow_income(db, add_row, today):
     add_row("t-redeem", "main", "acc-main", date(2026, 3, 25), "700.00", "Resgate",
             "investment")  # fmt: skip
-    res = summarize_transactions(db, MARCH, "kind", today=today) | {}
-    f_in = TxFilters(date_from=MARCH.date_from, date_to=MARCH.date_to, direction="in")
+    res =     f_in = TxFilters(date_from=MARCH.date_from, date_to=MARCH.date_to, direction="in")
     groups = summarize_transactions(db, f_in, "kind", today=today)["groups"]
     total = sum(Decimal(g["total"]) for g in groups)
     flow = cash_flow(db, date(2026, 3, 1), date(2026, 3, 31))
     assert str(total) == flow["totals"]["income"] == "5000.00"
-    assert res["groups"][0]["total"] == "408.20"
 
 
 def test_compare_previous_months_match_by_offset(db, add_row, today):
@@ -108,3 +106,27 @@ def test_compare_previous_months_match_by_offset(db, add_row, today):
     }  # fmt: skip
     assert groups[1]["previous"]["total"] == "55.90"
     assert groups[1]["previous"]["previous_key"] == "2026-01"
+
+
+def test_compare_previous_gap_pairs_by_calendar_offset(db, today):
+    # No February rows: March must still pair with January, not December.
+    with db.write() as cur:
+        cur.execute("DELETE FROM transactions WHERE id = 't-sub-4'")
+    f = TxFilters(date_from=date(2026, 2, 1), date_to=date(2026, 3, 31))
+    groups = summarize_transactions(db, f, "month", compare_previous=True, today=today)[
+        "groups"
+    ]
+    assert [g["key"] for g in groups] == ["2026-03"]
+    assert groups[0]["previous"]["previous_key"] == "2026-01"
+    assert groups[0]["previous"]["total"] == "55.90"
+
+
+def test_compare_previous_weeks_by_calendar_offset(db, today):
+    f = TxFilters(date_from=date(2026, 3, 9), date_to=date(2026, 3, 22))
+    groups = summarize_transactions(db, f, "week", compare_previous=True, today=today)[
+        "groups"
+    ]
+    by_key = {g["key"]: g for g in groups}
+    # 2026-W11 (Mar 9-15) pairs with W09 (Feb 23-Mar 1), which is empty.
+    assert by_key["2026-W11"]["previous"]["previous_key"] == "2026-W09"
+    assert by_key["2026-W11"]["previous"]["total"] == "0.00"

@@ -87,27 +87,37 @@ def summarize_transactions(
         ordered = sorted(current.values(), key=lambda g: g["key"])
     else:
         ordered = sorted(current.values(), key=lambda g: (-g["total"], g["key"]))
-    # Time groupings pair periods by ordinal offset (first with first, ...);
-    # other groupings match by key.
-    if group_by in _PERIOD_EXPR:
-        prev_keys = sorted(previous)
-        prev_key = {
-            g["key"]: prev_keys[i] for i, g in enumerate(ordered) if i < len(prev_keys)
-        }
-    else:
-        prev_key = {g["key"]: g["key"] for g in ordered}
+    # Time groupings pair periods by calendar offset (computed from the key,
+    # so empty periods do not shift the pairing); others match by key.
+    def previous_key_of(key: str) -> str:
+        if group_by == "month":
+            y, m = int(key[:4]), int(key[5:7])
+            idx = y * 12 + (m - 1) - months_in_window
+            return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
+        if group_by == "week":
+            y, w = int(key[:4]), int(key[6:8])
+            monday = date.fromisocalendar(y, w, 1) - timedelta(days=window_days)
+            iso = monday.isocalendar()
+            return f"{iso.year:04d}-W{iso.week:02d}"
+        return key
+
+    window_days = (date_to - date_from).days + 1
+    months_in_window = (date_to.year * 12 + date_to.month) - (
+        date_from.year * 12 + date_from.month
+    ) + 1
     groups = []
     for g in ordered:
         out = {k: jsonable(v) for k, v in g.items()}
         if compare_previous:
-            p = previous.get(prev_key[g["key"]]) if g["key"] in prev_key else None
+            pkey = previous_key_of(g["key"])
+            p = previous.get(pkey)
             block = (
                 {k: jsonable(p[k]) for k in ("total", "count", "average")}
                 if p
                 else {"total": str(_ZERO), "count": 0, "average": str(_ZERO)}
             )
             if group_by in _PERIOD_EXPR:
-                block["previous_key"] = prev_key.get(g["key"])
+                block["previous_key"] = pkey
             out["previous"] = block
         groups.append(out)
     return {"groups": groups, "period": period}

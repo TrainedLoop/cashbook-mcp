@@ -7,6 +7,9 @@ from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
 INTERNAL_KINDS = ("internal_transfer", "card_bill_payment")
+UNCATEGORIZED = "uncategorized"
+# Money is only summed in this currency; rows in any other are counted apart.
+BASE_CURRENCY = "BRL"
 
 
 @dataclass
@@ -51,7 +54,15 @@ def where_clause(f: TxFilters) -> tuple[str, list]:
     if f.account_ids:
         _in("account_id", f.account_ids, clauses, params)
     if f.categories:
-        _in("pluggy_category", f.categories, clauses, params)
+        # "uncategorized" is how groupings label a missing category.
+        named = [c for c in f.categories if c.lower() != UNCATEGORIZED]
+        parts = []
+        if named:
+            parts.append(f"pluggy_category IN ({', '.join('?' * len(named))})")
+            params.extend(named)
+        if len(named) < len(f.categories):
+            parts.append("pluggy_category IS NULL")
+        clauses.append("(" + " OR ".join(parts) + ")")
     if f.kinds:
         _in("kind", f.kinds, clauses, params)
     if f.text:
@@ -72,9 +83,11 @@ def where_clause(f: TxFilters) -> tuple[str, list]:
         clauses.append("amount > 0")
     elif f.direction == "out":
         clauses.append("amount < 0")
-    if f.exclude_internal:
-        clauses.append(f"kind NOT IN ({', '.join('?' * len(INTERNAL_KINDS))})")
-        params.extend(INTERNAL_KINDS)
+    # Kinds the caller asked for by name are never excluded.
+    excluded = [k for k in INTERNAL_KINDS if k not in (f.kinds or ())]
+    if f.exclude_internal and excluded:
+        clauses.append(f"kind NOT IN ({', '.join('?' * len(excluded))})")
+        params.extend(excluded)
     return (("WHERE " + " AND ".join(clauses)) if clauses else ""), params
 
 

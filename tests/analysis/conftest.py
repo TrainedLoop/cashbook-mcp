@@ -32,12 +32,13 @@ def add_tx(
     original=None,
     original_currency=None,
     bill_id=None,
+    currency="BRL",
 ):
     cur.execute(
         f"INSERT INTO transactions ({TX_COLS}) VALUES "
-        "(?, ?, ?, ?, ?, 'BRL', ?, ?, ?, ?, ?, ?, ?, ?, 'test', ?, ?)",
+        "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test', ?, ?)",
         [
-            id, alias, account_id, d, Decimal(amount), original, original_currency,
+            id, alias, account_id, d, Decimal(amount), currency, original, original_currency,
             description, counterpart, merchant, category, bill_id, kind, NOW, NOW,
         ],
     )  # fmt: skip

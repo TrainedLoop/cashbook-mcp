@@ -14,7 +14,7 @@ def test_month_boundary_tz(db, add_row):
             category="Groceries")  # fmt: skip
     today = today_in(SP, datetime(2026, 4, 1, 3, 30, tzinfo=UTC))
     mtd = finance_overview(db, today)["month_to_date"]
-    assert mtd == {"income": "0.00", "spending": "10.00", "net": "-10.00"}
+    assert mtd == {"income": "0.00", "refunds": "0.00", "spending": "10.00", "net": "-10.00"}
     march = finance_overview(db, date(2026, 3, 31))["month_to_date"]
     assert march["spending"] == "408.20"
 
@@ -32,9 +32,17 @@ def test_overview_shape(db, today):
     assert [a["id"] for a in ov["accounts"]] == ["acc-main", "acc-second"]
     assert [c["id"] for c in ov["cards"]] == ["card-main"]
     assert ov["month_to_date"] == {
-        "income": "5000.00", "spending": "408.20", "net": "4591.80",
+        "income": "5000.00", "refunds": "0.00", "spending": "408.20", "net": "4591.80",
     }  # fmt: skip
     assert len(ov["top_categories"]) <= 5
     assert ov["connections_with_problems"] == [
         {"alias": "second", "status": "LOGIN_ERROR", "error": "boom"}
     ]
+
+
+def test_overview_reports_skipped_foreign_rows(db, add_row, today):
+    add_row("t-eur", "main", "card-main", date(2026, 3, 13), "-9.99", "SHOP EU", "purchase",
+            currency="EUR")  # fmt: skip
+    mtd = finance_overview(db, today)["month_to_date"]
+    assert mtd["spending"] == "408.20"
+    assert mtd["excluded_foreign"] == 1

@@ -46,11 +46,15 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
     finally:
         cur.close()
     month_start = today.replace(day=1)
+    flow = cash_flow(db, month_start, today)
+    month_to_date = dict(flow["totals"])
+    if "excluded_foreign" in flow:
+        month_to_date["excluded_foreign"] = flow["excluded_foreign"]
     return {
         "accounts": accounts,
         "cards": cards,
         "bills_due": bills_due,
-        "month_to_date": cash_flow(db, month_start, today)["totals"],
+        "month_to_date": month_to_date,
         "top_categories": list_categories(db, month_start, today)[:5],
         "connections_with_problems": problems,
     }

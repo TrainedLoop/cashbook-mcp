@@ -83,3 +83,20 @@ def test_get_transactions(db):
     assert {r["id"] for r in rows} == {"t-usd", "t-salary"}
     with pytest.raises(ValueError):
         get_transactions(db, [f"id-{i}" for i in range(101)])
+
+
+def test_requested_internal_kinds_are_not_excluded(db):
+    res = search_transactions(db, TxFilters(kinds=["card_bill_payment"]))
+    assert [r["id"] for r in res["rows"]] == ["t-bill-pay"]
+    both = search_transactions(db, TxFilters(kinds=["internal_transfer", "purchase"]))
+    ids = {r["id"] for r in both["rows"]}
+    assert {"t-pix-out", "t-pix-in", "t-card-1"} <= ids
+    assert "t-bill-pay" not in ids
+
+
+def test_uncategorized_maps_to_null_category(db, add_row):
+    add_row("t-nocat", "main", "acc-main", date(2026, 3, 9), "-7.00", "Banca", "purchase")
+    res = search_transactions(db, TxFilters(categories=["uncategorized"]))
+    assert [r["id"] for r in res["rows"]] == ["t-nocat"]
+    mixed = search_transactions(db, TxFilters(categories=["uncategorized", "Groceries"]))
+    assert {r["id"] for r in mixed["rows"]} == {"t-nocat", "t-card-1"}

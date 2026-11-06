@@ -30,7 +30,8 @@ def test_spending_counts_purchases_once(db, today):
 def test_cash_flow_excludes_internal(db, today):
     res = cash_flow(db, date(2026, 3, 1), date(2026, 3, 31), today=today)
     assert res["periods"] == [
-        {"period": "2026-03", "income": "5000.00", "spending": "408.20", "net": "4591.80"}
+        {"period": "2026-03", "income": "5000.00", "refunds": "0.00", "spending": "408.20",
+         "net": "4591.80"}
     ]
     assert res["totals"]["net"] == "4591.80"
 
@@ -130,3 +131,61 @@ def test_compare_previous_weeks_by_calendar_offset(db, today):
     # 2026-W11 (Mar 9-15) pairs with W09 (Feb 23-Mar 1), which is empty.
     assert by_key["2026-W11"]["previous"]["previous_key"] == "2026-W09"
     assert by_key["2026-W11"]["previous"]["total"] == "0.00"
+
+
+def test_requested_internal_kinds_are_summarized(db, today):
+    f = TxFilters(date_from=MARCH.date_from, date_to=MARCH.date_to, kinds=["card_bill_payment"])
+    groups = summarize_transactions(db, f, "kind", today=today)["groups"]
+    assert [(g["key"], g["count"]) for g in groups] == [("card_bill_payment", 1)]
+
+
+def test_uncategorized_category_filter(db, add_row, today):
+    add_row("t-nocat", "main", "acc-main", date(2026, 3, 9), "-7.00", "Banca", "purchase")
+    f = TxFilters(date_from=MARCH.date_from, date_to=MARCH.date_to, categories=["uncategorized"])
+    groups = summarize_transactions(db, f, "category", today=today)["groups"]
+    assert [(g["key"], g["total"]) for g in groups] == [("uncategorized", "7.00")]
+
+
+def test_kinds_without_direction_are_signed(db, add_row, today):
+    # The internal PIX pair nets to zero; each side is reported in the split.
+    add_row("t-pix-out2", "main", "acc-main", date(2026, 3, 11), "-50.00", "PIX", "internal_transfer")
+    f = TxFilters(date_from=MARCH.date_from, date_to=MARCH.date_to, kinds=["internal_transfer"])
+    g = summarize_transactions(db, f, "kind", today=today)["groups"][0]
+    assert g["key"] == "internal_transfer"
+    assert (g["total"], g["in"], g["out"], g["count"]) == ("-50.00", "1000.00", "1050.00", 3)
+    assert g["average"] == "-16.67"
+
+
+def test_cash_flow_card_payment_and_refund(db, add_row, today):
+    # An uncategorized card-side payment, classified card_bill_payment, is not income;
+    # a refund lowers spending and is reported separately.
+    add_row("t-card-pay", "main", "card-main", date(2026, 3, 20), "300.00", "Pagamento recebido",
+            "card_bill_payment")  # fmt: skip
+    add_row("t-refund", "main", "card-main", date(2026, 3, 18), "20.00", "Estorno", "refund")
+    res = cash_flow(db, date(2026, 3, 1), date(2026, 3, 31), today=today)
+    assert res["totals"] == {
+        "income": "5000.00", "refunds": "20.00", "spending": "388.20", "net": "4611.80",
+    }  # fmt: skip
+    assert res["periods"][0]["refunds"] == "20.00"
+    assert res["periods"][0]["income"] == "5000.00"
+
+
+def test_foreign_currency_rows_are_not_summed(db, add_row, today):
+    add_row("t-eur", "main", "card-main", date(2026, 3, 13), "-9.99", "SHOP EU", "purchase",
+            category="Software", currency="EUR", original="-9.99", original_currency="EUR")  # fmt: skip
+    flow = cash_flow(db, date(2026, 3, 1), date(2026, 3, 31), today=today)
+    assert flow["totals"]["spending"] == "408.20"
+    assert flow["excluded_foreign"] == 1
+    summary = summarize_transactions(db, MARCH, "kind", today=today)
+    assert summary["groups"][0]["total"] == "408.20"
+    assert summary["excluded_foreign"] == 1
+    cats = {c["category"]: c["total"] for c in list_categories(db, MARCH.date_from, MARCH.date_to)}
+    assert cats["Software"] == "52.30"
+    clean = cash_flow(db, date(2025, 10, 1), date(2025, 10, 31), today=today)
+    assert "excluded_foreign" not in clean
+
+
+def test_signed_compare_previous_carries_split(db, today):
+    f = TxFilters(date_from=MARCH.date_from, date_to=MARCH.date_to, kinds=["internal_transfer"])
+    g = summarize_transactions(db, f, "kind", compare_previous=True, today=today)["groups"][0]
+    assert g["previous"] == {"total": "0.00", "count": 0, "average": "0.00", "in": "0.00", "out": "0.00"}

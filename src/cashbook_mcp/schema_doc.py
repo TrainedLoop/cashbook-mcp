@@ -23,8 +23,10 @@ _TRANSACTION_DOCS: dict[str, str] = {
     "date": "Transaction date (local date).",
     "amount": "Signed amount in currency: negative = money out (purchase, payment), "
     "positive = money in (income, refund). Same convention for bank and card accounts.",
-    "currency": "ISO currency code of amount, e.g. BRL.",
-    "original_amount": "Amount in the original currency for foreign purchases, if any.",
+    "currency": "ISO currency code of amount, e.g. BRL. Usually the account currency; a foreign "
+    "transaction the bank did not convert keeps its own currency here.",
+    "original_amount": "Amount in the original currency for foreign purchases, if any. "
+    "Same sign convention as amount.",
     "original_currency": "ISO code of original_amount, if any.",
     "description": "Statement description." + _UNTRUSTED,
     "counterpart_name": "Name of the payer or payee (e.g. PIX counterpart)."

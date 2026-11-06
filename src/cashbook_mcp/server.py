@@ -278,7 +278,10 @@ def create_mcp(
     @mcp.tool(annotations=READ_ONLY, description=(
         "Totals per group (category, merchant, month, week, account or kind): total, count, average, first "
         "and last date. Same filters as search_transactions; the period defaults to the last 30 days. With "
-        "compare_previous=true, each group also has the figures of the preceding period of equal length."
+        "compare_previous=true, each group also has the figures of the preceding period of equal length. "
+        "Totals are absolute, except with `kinds` and no `direction`: then total is signed and `in`/`out` "
+        "give each side. Only BRL rows are summed; `excluded_foreign` counts rows skipped in other "
+        "currencies. Category \"uncategorized\" matches rows with no category."
         + DATES_NOTE + UNTRUSTED_NOTE
     ))  # fmt: skip
     async def summarize_transactions(
@@ -306,7 +309,9 @@ def create_mcp(
 
     @mcp.tool(annotations=READ_ONLY, description=(
         "Income, spending and net per month or week, optionally per account. Internal transfers, card bill "
-        "payments and investment movements are excluded." + DATES_NOTE
+        "payments and investment movements are excluded. Income counts only kind=income; refunds lower "
+        "spending and are reported as `refunds`. Only BRL rows are summed; `excluded_foreign` counts rows "
+        "skipped in other currencies." + DATES_NOTE
     ))  # fmt: skip
     async def cash_flow(
         date_from: date,

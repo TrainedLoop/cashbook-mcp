@@ -18,6 +18,7 @@ def test_headers_values():
     assert SECURITY_HEADERS == {
         "Content-Security-Policy": EXPECTED_CSP,
         "X-Frame-Options": "DENY",
+        "X-Content-Type-Options": "nosniff",
         "Referrer-Policy": "same-origin",
         "Cache-Control": "no-store",
     }
@@ -111,3 +112,9 @@ def test_security_headers_on_all_admin_responses(env, monkeypatch):
     check(env.send("POST", "/admin/auth/logout"))
     shutil.rmtree(env.static)
     check(env.client.get("/admin"))  # 503
+
+
+@pytest.mark.parametrize("path", ["/admin", "/admin/assets/app-abc123.js", "/admin/assets/missing.js"])
+def test_nosniff_on_admin_responses(env, path):
+    resp = env.client.get(path)
+    assert resp.headers["x-content-type-options"] == "nosniff"

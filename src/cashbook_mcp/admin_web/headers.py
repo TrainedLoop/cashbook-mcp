@@ -17,6 +17,7 @@ CSP = (
 SECURITY_HEADERS = {
     "Content-Security-Policy": CSP,
     "X-Frame-Options": "DENY",
+    "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "same-origin",  # not no-referrer: browsers then send "Origin: null" on POSTs
     # The default; the SPA routes set their own (no-cache for index.html, immutable for assets).
     "Cache-Control": "no-store",

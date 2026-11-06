@@ -3,8 +3,9 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 import requests
-from cashbook_mcp.admin_web.identity import GoogleIdentity, LoginError, OwnerLogin
 from google.auth.exceptions import TransportError
+
+from cashbook_mcp.admin_web.identity import GoogleIdentity, LoginError, OwnerLogin
 
 
 class FakeResponse:

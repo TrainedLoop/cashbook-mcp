@@ -11,11 +11,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlsplit
 from zoneinfo import ZoneInfo
 
+from starlette.testclient import TestClient
+
 from cashbook_mcp.admin_web.api import AdminContext
 from cashbook_mcp.admin_web.identity import LoginError, OwnerLogin
 from cashbook_mcp.admin_web.session import FLOW_COOKIE, SESSION_COOKIE
-from starlette.testclient import TestClient
-
 from cashbook_mcp.config import DEFAULT_REDIRECT_URIS, Settings
 from cashbook_mcp.models import Connection
 from cashbook_mcp.store.db import Database

@@ -1,0 +1,4 @@
+{"total":2,"totalPages":1,"page":1,"results":[
+{"id":"acc-bank-1","itemId":"item-1","type":"BANK","subtype":"CHECKING_ACCOUNT","name":"Conta Corrente","number":"1234-5","balance":2500.75,"currencyCode":"BRL","marketingName":"Conta Exemplo","owner":"MARIA EXEMPLO","bankData":{"transferNumber":"0001/1234/12345-6","closingBalance":2500.75},"creditData":null},
+{"id":"acc-credit-1","itemId":"item-1","type":"CREDIT","subtype":"CREDIT_CARD","name":"Cartao Exemplo Platinum","number":"4321","balance":-1200.5,"currencyCode":"BRL","marketingName":"Platinum","owner":"MARIA EXEMPLO","bankData":null,"creditData":{"level":"PLATINUM","brand":"MASTERCARD","balanceCloseDate":"2026-11-05","balanceDueDate":"2026-11-12","availableCreditLimit":5000.0,"creditLimit":8000.0}}
+]}

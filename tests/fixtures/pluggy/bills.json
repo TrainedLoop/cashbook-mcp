@@ -1,0 +1,4 @@
+{"total":2,"totalPages":1,"page":1,"results":[
+{"id":"bill-1","dueDate":"2026-11-12T00:00:00.000Z","totalAmount":1200.5,"totalAmountCurrencyCode":"BRL","minimumPaymentAmount":180.0,"allowsInstallments":true,"financeCharges":[]},
+{"id":"bill-0","dueDate":"2026-10-12T00:00:00.000Z","totalAmount":980.0,"totalAmountCurrencyCode":"BRL","minimumPaymentAmount":147.0,"allowsInstallments":true,"financeCharges":[]}
+]}

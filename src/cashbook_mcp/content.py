@@ -73,7 +73,8 @@ _ACTION = re.compile(
     r"|\bupdate\s+(?:my\s+|the\s+)?(?:preferences|settings)\b"
     r"|\bupdate\s+your\s+settings\b"
     r"|\breply\s+to\b[^\n]{0,120}?\bwith\b"
-    r"|\btransfira\b|\bfa[c\u00e7]a\s+um\s+pix\b|\bpague\b",
+    r"|\b(?:pague|transfira)\s+(?:(?:o|a|os|as|este|esta|esse|essa)\b|r\$|a\s+quantia|\d)"
+    r"|\bfa[c\u00e7]a\s+um\s+pix\b",
     re.IGNORECASE,
 )
 

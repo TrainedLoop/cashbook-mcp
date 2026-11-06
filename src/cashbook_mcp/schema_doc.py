@@ -198,6 +198,23 @@ NOTES: list[str] = [
     ),
     (
         "Money columns are returned as decimal strings; dates and timestamps as ISO 8601 "
-        "strings (timestamps are UTC)."
+        "strings. Text cells longer than 8192 characters are cut and end with "
+        "'…[truncated]'; results stop at about 4 MB (truncated=true)."
+    ),
+    (
+        "Stored timestamps (first_seen_at, last_seen_at, removed_at, created_at, ...) are "
+        "naive UTC TIMESTAMPs, while now() and current_timestamp are TIMESTAMP WITH TIME "
+        "ZONE in the server time zone. To compare, use timezone('UTC', now()), which is "
+        "naive UTC; now()::TIMESTAMP is local time, not UTC. Transaction dates are local "
+        "DATEs."
+    ),
+    (
+        "Lambdas use Python-style syntax: list_transform(l, lambda x: x + 1), not the "
+        "deprecated arrow form x -> x + 1."
+    ),
+    (
+        "PIVOT needs an explicit IN list, e.g. PIVOT v_spending ON kind IN ('purchase', "
+        "'fee') USING sum(amount) GROUP BY alias; without IN it is rejected, also inside "
+        "a subquery. Conditional aggregation (sum(amount) FILTER (WHERE ...)) also works."
     ),
 ]

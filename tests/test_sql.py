@@ -1,5 +1,9 @@
+import json
+import os
 import time
+from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 
 import duckdb
 import pytest
@@ -7,10 +11,18 @@ import pytest
 from cashbook_mcp import schema_doc
 from cashbook_mcp.content import MARK_CLOSE, MARK_OPEN
 from cashbook_mcp.sql import (
+    MAX_CELL_CHARS,
+    MAX_RESULT_BYTES,
     MAX_ROWS,
+    MAX_SQL_BYTES,
     TIMEOUT_S,
+    TRUNCATED_SUFFIX,
     QueryResult,
     SqlRejected,
+    _check,
+    _clean_message,
+    _is_wrapper_of,
+    _wrap,
     describe_schema,
     run_query,
 )
@@ -146,6 +158,19 @@ def test_constants():
         "SELECT * FROM duckdb_databases()",
         "SELECT * FROM duckdb_settings()",
         "SELECT * FROM pandas_scan('x')",
+        # SQL text <-> plan/AST helpers and settings
+        "SELECT json_serialize_plan('SELECT 1')",
+        "SELECT json_deserialize_sql(json_serialize_sql('SELECT 1'))",
+        "SELECT current_setting('memory_limit')",
+        "SELECT CURRENT_SETTING('allowed_paths')",
+        "SELECT * FROM duckdb_databases",
+        "SELECT * FROM main.duckdb_databases",
+        "SELECT path FROM system.main.DUCKDB_DATABASES",
+        "SELECT * FROM pragma_database_list",
+        "SELECT * FROM pg_settings",
+        "SELECT * FROM pg_catalog.pg_settings",
+        "SELECT * FROM PG_DATABASE",
+        "WITH d AS (SELECT * FROM duckdb_databases) SELECT * FROM d",
     ],
 )
 def test_rejects(db, sql):
@@ -400,3 +425,167 @@ def test_duckdb_error_type_is_not_leaked(db):
     with pytest.raises(SqlRejected) as exc:
         run_query(db, "SELECT 1/0::int, error('boom')")
     assert not isinstance(exc.value, duckdb.Error)
+
+
+def test_sql_length_cap(db):
+    with pytest.raises(SqlRejected) as exc:
+        run_query(db, "SELECT 1 " + " " * MAX_SQL_BYTES)
+    assert exc.value.reason == "too_long"
+    assert MAX_SQL_BYTES == 100 * 1024
+    ok = "SELECT 1" + " " * (MAX_SQL_BYTES - 20)
+    assert run_query(db, ok).rows == [[1]]
+
+
+def test_large_result_is_bounded(db):
+    start = time.monotonic()
+    result = run_query(db, "SELECT repeat('x', 1000000) AS big FROM range(1001)")
+    assert time.monotonic() - start < 5
+    assert result.truncated is True
+    assert 0 < len(result.rows) < 1000
+    assert len(json.dumps(result.rows, ensure_ascii=False).encode()) < 5 * 1024 * 1024
+    assert MAX_RESULT_BYTES == 4 * 1024 * 1024
+    for (cell,) in result.rows:
+        assert cell == "x" * MAX_CELL_CHARS + TRUNCATED_SUFFIX
+
+
+def test_cell_cap(db):
+    assert MAX_CELL_CHARS == 8192
+    result = run_query(
+        db,
+        "SELECT repeat('a', 9000) AS t, repeat('b', 8192) AS exact, "
+        "[repeat('c', 9000)] AS l, {'k': repeat('d', 9000)} AS s, "
+        "repeat('e', 9000)::BLOB AS b, 'small' AS small, [1, 2] AS ints",
+    )
+    assert result.truncated is True
+    t, exact, lst, struct, blob, small, ints = result.rows[0]
+    assert t == "a" * MAX_CELL_CHARS + TRUNCATED_SUFFIX
+    assert exact == "b" * MAX_CELL_CHARS
+    assert lst.startswith("[ccc") and lst.endswith(TRUNCATED_SUFFIX)
+    assert len(lst) == MAX_CELL_CHARS + len(TRUNCATED_SUFFIX)
+    assert struct.startswith("{'k': ddd") and struct.endswith(TRUNCATED_SUFFIX)
+    assert blob.startswith("6565") and blob.endswith(TRUNCATED_SUFFIX)
+    assert (small, ints) == ("small", [1, 2])
+    assert result.types == [
+        "VARCHAR",
+        "VARCHAR",
+        "VARCHAR[]",
+        "STRUCT(k VARCHAR)",
+        "BLOB",
+        "VARCHAR",
+        "INTEGER[]",
+    ]
+    untouched = run_query(db, "SELECT repeat('a', 10) AS t, [repeat('c', 10)] AS l")
+    assert untouched.truncated is False
+    assert untouched.rows == [["a" * 10, ["c" * 10]]]
+
+
+def test_marker_survives_cell_cap(db):
+    insert_tx(db, "t1", f"{MARK_OPEN}payload{MARK_CLOSE}")
+    result = run_query(
+        db, "SELECT description || repeat('z', 9000) AS d FROM transactions"
+    )
+    assert result.truncated is True
+    assert result.suspicious_cells == [(0, "d")]
+
+
+def test_timestamptz(db):
+    result = run_query(
+        db, "SELECT now() AS n, TIMESTAMPTZ '2026-01-01 10:00:00+00' AS t"
+    )
+    assert result.types == ["TIMESTAMP WITH TIME ZONE"] * 2
+    now, fixed = result.rows[0]
+    assert isinstance(now, str) and now[10] == "T" and now[-6] in "+-"
+    assert fixed[-6] in "+-"
+    assert datetime.fromisoformat(fixed) == datetime.fromisoformat(
+        "2026-01-01T10:00:00+00:00"
+    )
+
+
+def test_wrapping_keeps_query_semantics(db):
+    assert run_query(db, "SELECT 1 AS a; -- trailing note").rows == [[1]]
+    assert run_query(db, "SELECT 1 AS a -- trailing note").rows == [[1]]
+    assert run_query(db, "SELECT 1 AS a /* note */ ;").rows == [[1]]
+    pivot = run_query(
+        db, "PIVOT (SELECT 1 AS k, 'a' AS kind) ON kind IN ('a') USING count(*)"
+    )
+    assert pivot.rows == [[1, 1]]
+    assert run_query(db, "SELECT list_transform([1], lambda x: x + 1) AS l").rows == [
+        [[2]]
+    ]
+    ordered = run_query(db, "SELECT range AS n FROM range(5000) ORDER BY hash(range)")
+    expected = db.read().execute("SELECT range FROM range(5000) ORDER BY hash(range)")
+    assert [r[0] for r in ordered.rows] == [r[0] for r in expected.fetchmany(1000)]
+    assert run_query(db, "SELECT 1 AS a, 2 AS a").rows == [[1, 2]]
+
+
+def test_wrapper_check_detects_mismatch():
+    statement = _check("SELECT 1")
+    assert _is_wrapper_of(_wrap("SELECT 1", "*", "", 0), statement)
+    assert not _is_wrapper_of(_wrap("SELECT 2", "*", "", 0), statement)
+    assert not _is_wrapper_of("SELECT * FROM (SELECT 1) AS other LIMIT 1", statement)
+    assert not _is_wrapper_of(_wrap("SELECT 1", "*", "", 0) + "; SELECT 2", statement)
+
+
+def test_clean_message_keeps_markers():
+    message = (
+        f"Conversion Error: {MARK_OPEN}x{MARK_CLOSE} near '/etc/passwd' C:\\keys\\db"
+    )
+    cleaned = _clean_message(message)
+    assert MARK_OPEN in cleaned and MARK_CLOSE in cleaned
+    assert "/etc/passwd" not in cleaned and "C:\\keys" not in cleaned
+
+
+def test_error_message_keeps_markers(db):
+    with pytest.raises(SqlRejected) as exc:
+        run_query(db, f"SELECT CAST('{MARK_OPEN}x{MARK_CLOSE}' AS INTEGER)")
+    assert MARK_CLOSE in str(exc.value)
+
+
+def test_notes_cover_dialect_pitfalls():
+    notes = " ".join(schema_doc.NOTES)
+    assert "lambda x:" in notes and "x -> " in notes
+    assert "PIVOT" in notes and "IN (" in notes
+    assert "naive UTC" in notes and "now()" in notes and "current_timestamp" in notes
+
+
+SNAPSHOT = Path(__file__).parent / "fixtures" / "duckdb_functions.json"
+SNAPSHOT_TYPES = ("scalar", "table", "macro", "table_macro")
+
+
+def _function_names() -> dict[str, list[str]]:
+    conn = duckdb.connect(":memory:")
+    try:
+        rows = conn.execute(
+            "SELECT DISTINCT function_type, function_name FROM duckdb_functions() "
+            "WHERE function_type IN ('scalar', 'table', 'macro', 'table_macro')"
+        ).fetchall()
+    finally:
+        conn.close()
+    return {t: sorted(n for kind, n in rows if kind == t) for t in SNAPSHOT_TYPES}
+
+
+def test_duckdb_function_snapshot():
+    """Fails when DuckDB's function catalog changes.
+
+    New functions may have side effects or read files. Re-review
+    _ALLOWED_TABLE_FUNCTIONS, _DENIED_FUNCTIONS and _DENIED_TABLES in
+    cashbook_mcp/sql.py, then regenerate with
+    CASHBOOK_UPDATE_FUNCTION_SNAPSHOT=1 uv run pytest tests/test_sql.py -k snapshot
+    """
+    current = _function_names()
+    if os.environ.get("CASHBOOK_UPDATE_FUNCTION_SNAPSHOT") == "1":
+        SNAPSHOT.write_text(json.dumps(current, indent=1) + "\n")
+    stored = json.loads(SNAPSHOT.read_text())
+    drift = {
+        t: {
+            "added": sorted(set(current[t]) - set(stored.get(t, []))),
+            "removed": sorted(set(stored.get(t, [])) - set(current[t])),
+        }
+        for t in SNAPSHOT_TYPES
+    }
+    drift = {t: d for t, d in drift.items() if d["added"] or d["removed"]}
+    assert not drift, (
+        f"DuckDB {duckdb.__version__} function catalog changed: {drift}. "
+        "Re-review the allow/deny lists in cashbook_mcp/sql.py, then regenerate "
+        "tests/fixtures/duckdb_functions.json with CASHBOOK_UPDATE_FUNCTION_SNAPSHOT=1."
+    )

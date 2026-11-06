@@ -30,9 +30,16 @@ from cashbook_mcp.store.db import Database
 MAX_ROWS = 1000
 TIMEOUT_S = 10
 
+MAX_SQL_BYTES = 100 * 1024
+MAX_CELL_CHARS = 8192
+MAX_RESULT_BYTES = 4 * 1024 * 1024
+TRUNCATED_SUFFIX = "…[truncated]"
+
 # Grace period for the worker to roll back and close after an interrupt.
 _INTERRUPT_GRACE_S = 5.0
 _MAX_MESSAGE_CHARS = 300
+_FETCH_BATCH = 64
+_SUBQUERY_ALIAS = "__cb_q"
 
 # Table functions the agent may use. Everything else is rejected: file readers
 # (DuckDB allows reading the store file and its WAL even with external access
@@ -62,15 +69,39 @@ _ALLOWED_TABLE_FUNCTIONS = frozenset(
 )
 
 # Scalar functions with effects outside the rolled-back transaction (sequences
-# are not transactional in DuckDB) or that write logs.
-_DENIED_FUNCTIONS = frozenset({"nextval", "setval", "write_log"})
+# are not transactional in DuckDB), that write logs, that expose settings
+# (paths), or that turn SQL text into plans/ASTs.
+_DENIED_FUNCTIONS = frozenset(
+    {
+        "nextval",
+        "setval",
+        "write_log",
+        "current_setting",
+        "json_serialize_plan",
+        "json_deserialize_sql",
+    }
+)
 _DENIED_PREFIXES = ("__internal",)
+
+# System views and tables that expose file paths or settings.
+_DENIED_TABLES = frozenset(
+    {"duckdb_databases", "pragma_database_list", "pg_settings", "pg_database"}
+)
 
 # Characters that make a table reference a file or URL (replacement scan).
 _FILEISH = re.compile(r"[/\\.:]")
 
-# Absolute POSIX paths and Windows drive paths inside error messages.
-_PATH_RE = re.compile(r"(?:(?<![\w.])/|\b[A-Za-z]:\\)[^\s\"'`,)]*")
+# Absolute POSIX paths and Windows drive paths inside error messages. A slash
+# right after U+27E6 is the closing untrusted marker, not a path.
+_PATH_RE = re.compile(r"(?:(?<![\w.⟦])/|\b[A-Za-z]:\\)[^\s\"'`,)]*")
+
+# Result types whose values have a small, fixed size and need no cap.
+_FIXED_TYPES = re.compile(
+    r"(?:BOOLEAN|U?TINYINT|U?SMALLINT|U?INTEGER|U?BIGINT|U?HUGEINT|FLOAT|DOUBLE"
+    r"|DECIMAL\(\d+,\d+\)|DATE|TIME|TIME WITH TIME ZONE|TIMESTAMP(?:_S|_MS|_NS)?"
+    r"|TIMESTAMP WITH TIME ZONE|INTERVAL|UUID|\"NULL\")"
+)
+_TEXT_TYPES = frozenset({"VARCHAR", "JSON"})
 
 
 class SqlRejected(Exception):
@@ -117,15 +148,44 @@ def _violations(node: object) -> set[str]:
             ):
                 found.add(name.lower())
             table = item.get("table_name")
-            if isinstance(table, str) and _FILEISH.search(table):
-                found.add("file or URL reference")
+            if isinstance(table, str):
+                if _FILEISH.search(table):
+                    found.add("file or URL reference")
+                elif table.lower() in _DENIED_TABLES:
+                    found.add(table.lower())
             stack.extend(item.values())
         elif isinstance(item, list):
             stack.extend(item)
     return found
 
 
-def _check(sql: str) -> None:
+def _parse(sql: str) -> dict:
+    """Serialize sql to its AST on an empty, locked connection; nothing is executed."""
+    error: str | None = None
+    parser = duckdb.connect(
+        ":memory:",
+        config={"threads": 1, "memory_limit": "64MB", "enable_external_access": False},
+    )
+    try:
+        raw = parser.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0]
+    except duckdb.Error as e:
+        error = _clean_message(str(e))
+    finally:
+        parser.close()
+    if error is not None:
+        raise SqlRejected("syntax", error)
+    tree = json.loads(raw)
+    if tree.get("error"):
+        raise SqlRejected(
+            "not_select", _clean_message(str(tree.get("error_message", "")))
+        )
+    return tree
+
+
+def _check(sql: str) -> dict:
+    """Accept exactly one allowed SELECT; return its statement AST."""
+    if len(sql.encode("utf-8", "surrogatepass")) > MAX_SQL_BYTES:
+        raise SqlRejected("too_long", f"sql is longer than {MAX_SQL_BYTES} bytes")
     error: str | None = None
     try:
         statements = duckdb.extract_statements(sql)
@@ -139,26 +199,111 @@ def _check(sql: str) -> None:
         )
     if statements[0].type != duckdb.StatementType.SELECT:
         raise SqlRejected("not_select", "only SELECT (or WITH ... SELECT) is allowed")
-
-    # Parse to an AST on an empty, locked connection; nothing is executed.
-    parser = duckdb.connect(":memory:")
-    try:
-        parser.execute("SET enable_external_access=false")
-        raw = parser.execute("SELECT json_serialize_sql(?)", [sql]).fetchone()[0]
-    except duckdb.Error as e:
-        error = _clean_message(str(e))
-    finally:
-        parser.close()
-    if error is not None:
-        raise SqlRejected("syntax", error)
-    tree = json.loads(raw)
-    if tree.get("error"):
-        raise SqlRejected(
-            "not_select", _clean_message(str(tree.get("error_message", "")))
-        )
-    denied = _violations(tree.get("statements"))
+    tree = _parse(sql)
+    if len(tree.get("statements") or []) != 1:
+        raise SqlRejected("not_single_statement", "expected 1 statement")
+    denied = _violations(tree["statements"])
     if denied:
         raise SqlRejected("not_allowed", ", ".join(sorted(denied)))
+    return tree["statements"][0]
+
+
+def _strip_locations(node: object) -> object:
+    if isinstance(node, dict):
+        return {
+            k: _strip_locations(v)
+            for k, v in node.items()
+            if not k.startswith("query_location")
+        }
+    if isinstance(node, list):
+        return [_strip_locations(v) for v in node]
+    return node
+
+
+def _wrap(inner: str, select_list: str, aliases: str, limit: int) -> str:
+    # The newlines end any trailing line comment of the inner query.
+    return (
+        f"SELECT {select_list} FROM (\n{inner}\n) AS {_SUBQUERY_ALIAS}{aliases} "
+        f"LIMIT {int(limit)}"
+    )
+
+
+def _is_wrapper_of(wrapped: str, statement: dict) -> bool:
+    """True if wrapped is our outer SELECT over a subquery identical to statement."""
+    try:
+        tree = _parse(wrapped)
+    except SqlRejected:
+        return False
+    statements = tree.get("statements") or []
+    if len(statements) != 1:
+        return False
+    node = statements[0].get("node") or {}
+    from_table = node.get("from_table") or {}
+    return (
+        node.get("type") == "SELECT_NODE"
+        and from_table.get("type") == "SUBQUERY"
+        and from_table.get("alias") == _SUBQUERY_ALIAS
+        and any(m.get("type") == "LIMIT_MODIFIER" for m in node.get("modifiers", []))
+        and _strip_locations((from_table.get("subquery") or {}).get("node"))
+        == _strip_locations(statement.get("node"))
+        and not _violations(statements)
+    )
+
+
+def _inner_candidates(sql: str, statement: dict) -> list[str]:
+    stripped = sql.strip()
+    while stripped.endswith(";"):
+        stripped = stripped[:-1].rstrip()
+    candidates = [stripped]
+    # Fallback for a terminator followed by a comment ("SELECT 1; -- note"):
+    # DuckDB's own rendering of the AST. Only used if its AST is identical.
+    parser = duckdb.connect(":memory:", config={"threads": 1, "memory_limit": "64MB"})
+    try:
+        rendered = parser.execute(
+            "SELECT json_deserialize_sql(?)",
+            [json.dumps({"error": False, "statements": [statement]})],
+        ).fetchone()[0]
+        candidates.append(rendered)
+    except duckdb.Error:
+        pass
+    finally:
+        parser.close()
+    return candidates
+
+
+def _bounded_sql(sql: str, statement: dict) -> str:
+    """The inner query text that, wrapped, reproduces statement exactly."""
+    for inner in _inner_candidates(sql, statement):
+        if _is_wrapper_of(_wrap(inner, "*", "", 0), statement):
+            return inner
+    raise SqlRejected("syntax", "the query cannot be run in the sandbox")
+
+
+def _capped_select(types: list[str]) -> tuple[str, list[str]]:
+    """Outer select list capping variable-size values; returns (sql, plan)."""
+    exprs: list[str] = []
+    plan: list[str] = []
+    cap = MAX_CELL_CHARS
+    for i, type_name in enumerate(types):
+        col = f"c{i}"
+        if _FIXED_TYPES.fullmatch(type_name):
+            exprs.append(col)
+            plan.append("plain")
+        elif type_name in _TEXT_TYPES:
+            exprs.append(f"left(CAST({col} AS VARCHAR), {cap + 1})")
+            plan.append("text")
+        elif type_name == "BLOB":
+            over = f"octet_length({col}) > {cap // 2}"
+            exprs.append(f"CASE WHEN {over} THEN NULL ELSE {col} END")
+            exprs.append(f"CASE WHEN {over} THEN left(hex({col}), {cap}) END")
+            plan.append("capped")
+        else:
+            text = f"CAST({col} AS VARCHAR)"
+            over = f"strlen({text}) > {cap}"
+            exprs.append(f"CASE WHEN {over} THEN NULL ELSE {col} END")
+            exprs.append(f"CASE WHEN {over} THEN left({text}, {cap}) END")
+            plan.append("capped")
+    return ", ".join(exprs), plan
 
 
 def _convert(value: object) -> object:
@@ -185,13 +330,50 @@ def _flagged(value: object) -> bool:
     return has_marker(value)
 
 
+def _row_cells(raw: tuple, plan: list[str]) -> tuple[list, bool]:
+    """Undo the capping columns of one fetched row; return (cells, any_cut)."""
+    cells: list = []
+    cut = False
+    j = 0
+    for kind in plan:
+        if kind == "plain":
+            cells.append(_convert(raw[j]))
+            j += 1
+        elif kind == "text":
+            value = raw[j]
+            j += 1
+            if isinstance(value, str) and len(value) > MAX_CELL_CHARS:
+                value = value[:MAX_CELL_CHARS] + TRUNCATED_SUFFIX
+                cut = True
+            cells.append(value)
+        else:
+            value, text = raw[j], raw[j + 1]
+            j += 2
+            if text is not None:
+                cells.append(text + TRUNCATED_SUFFIX)
+                cut = True
+            else:
+                cells.append(_convert(value))
+    return cells, cut
+
+
+def _size(row: list) -> int:
+    return len(json.dumps(row, ensure_ascii=False, default=str).encode())
+
+
 def run_query(
     db: Database, sql: str, *, max_rows: int = MAX_ROWS, timeout_s: float = TIMEOUT_S
 ) -> QueryResult:
-    """Run one read-only SELECT. Raises SqlRejected on rejection, error or timeout."""
+    """Run one read-only SELECT. Raises SqlRejected on rejection, error or timeout.
+
+    Results are bounded: at most max_rows rows, text cells of at most
+    MAX_CELL_CHARS characters, and at most MAX_RESULT_BYTES of JSON in total.
+    Any of these cuts sets truncated.
+    """
     if not isinstance(sql, str):
         raise SqlRejected("syntax", "sql must be a string")
-    _check(sql)
+    statement = _check(sql)
+    inner = _bounded_sql(sql, statement)
 
     cur = db.read()
     done = threading.Event()
@@ -201,14 +383,49 @@ def run_query(
         try:
             cur.execute("BEGIN")
             try:
-                cur.execute(sql)
-                outcome["description"] = cur.description or []
-                outcome["rows"] = cur.fetchmany(max_rows + 1)
+                cur.execute(_wrap(inner, "*", "", 0))
+                description = cur.description or []
+                types = [str(d[1]) for d in description]
+                select_list, plan = _capped_select(types)
+                aliases = "(" + ", ".join(f"c{i}" for i in range(len(types))) + ")"
+                bounded = _wrap(inner, select_list or "*", aliases, max_rows + 1)
+                if not _is_wrapper_of(bounded, statement):
+                    raise SqlRejected(
+                        "syntax", "the query cannot be run in the sandbox"
+                    )
+                cur.execute(bounded)
+                rows: list[list] = []
+                truncated = False
+                full = False
+                total = 2  # the enclosing []
+                while not full:
+                    batch = cur.fetchmany(_FETCH_BATCH)
+                    if not batch:
+                        break
+                    for raw in batch:
+                        if len(rows) == max_rows:
+                            full = True
+                            break
+                        cells, cut = _row_cells(raw, plan)
+                        size = _size(cells) + 1
+                        if total + size > MAX_RESULT_BYTES:
+                            full = True
+                            break
+                        truncated = truncated or cut
+                        total += size
+                        rows.append(cells)
+                truncated = truncated or full
+                outcome["columns"] = [d[0] for d in description]
+                outcome["types"] = types
+                outcome["rows"] = rows
+                outcome["truncated"] = truncated
             finally:
                 try:
                     cur.execute("ROLLBACK")
                 except duckdb.Error:
                     pass
+        except SqlRejected as e:
+            outcome["rejected"] = e
         except duckdb.Error as e:
             outcome["error"] = str(e)
         except BaseException as e:  # noqa: BLE001 - reported to the caller below
@@ -229,22 +446,22 @@ def run_query(
         done.wait(_INTERRUPT_GRACE_S)
         raise SqlRejected("timeout", f"query exceeded {timeout_s:g} s")
 
+    if "rejected" in outcome:
+        raise outcome["rejected"] from None
     if "error" in outcome:
         raise SqlRejected("error", _clean_message(str(outcome["error"])))
 
-    description = outcome["description"]
-    raw_rows = outcome["rows"]
-    columns = [d[0] for d in description]
-    types = [str(d[1]) for d in description]
-    truncated = len(raw_rows) > max_rows
-    rows = [[_convert(v) for v in row] for row in raw_rows[:max_rows]]
+    columns = outcome["columns"]
+    rows = outcome["rows"]
     suspicious = [
         (i, columns[j])
         for i, row in enumerate(rows)
         for j, v in enumerate(row)
         if _flagged(v)
     ]
-    return QueryResult(columns, types, rows, truncated, suspicious)
+    return QueryResult(
+        columns, outcome["types"], rows, outcome["truncated"], suspicious
+    )
 
 
 def describe_schema(db: Database) -> dict:

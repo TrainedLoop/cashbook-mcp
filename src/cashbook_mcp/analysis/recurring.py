@@ -8,7 +8,7 @@ from itertools import pairwise
 from statistics import median
 from typing import Literal
 
-from cashbook_mcp.content import MARK_CLOSE, MARK_OPEN
+from cashbook_mcp.content import MARK_CLOSE, MARK_OPEN, wrap_suspicious
 from cashbook_mcp.store.db import Database
 
 from .filters import INTERNAL_KINDS, jsonable
@@ -65,7 +65,8 @@ def find_recurring(
         raise ValueError("months and min_occurrences must be >= 1")
     marks = ", ".join("?" * len(INTERNAL_KINDS))
     sql = (
-        "SELECT id, date, amount, coalesce(merchant_name, counterpart_name, description) "
+        "SELECT id, date, amount, coalesce(merchant_name, counterpart_name, description), "
+        "text_suspicious "
         f"FROM v_transactions WHERE date > ? AND date <= ? AND kind NOT IN ({marks}) "
         "AND amount != 0 ORDER BY date, id"
     )
@@ -76,10 +77,16 @@ def find_recurring(
         cur.close()
 
     groups: dict[tuple[str, str], list[tuple]] = {}
-    for id, d, amount, name in fetched:
+    # Normalizing strips the untrusted markers, so remember which groups had a
+    # flagged row and wrap their key again below.
+    flagged: set[tuple[str, str]] = set()
+    for id, d, amount, name, suspicious in fetched:
         key = _normalize_key(name or "")
         if key:
-            groups.setdefault((key, "in" if amount > 0 else "out"), []).append((id, d, amount))
+            group = (key, "in" if amount > 0 else "out")
+            groups.setdefault(group, []).append((id, d, amount))
+            if suspicious:
+                flagged.add(group)
 
     items = []
     for (key, direction), rows in groups.items():
@@ -97,7 +104,7 @@ def find_recurring(
         last = picked[-1][1]
         items.append(
             {
-                "key": key,
+                "key": wrap_suspicious(key) if (key, direction) in flagged else key,
                 "direction": direction,
                 "typical_amount": jsonable(typical.quantize(_CENT)),
                 "cadence_days": cadence,

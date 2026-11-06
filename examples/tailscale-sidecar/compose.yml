@@ -1,24 +1,39 @@
 # Tailscale sidecar: the tailscale container joins the tailnet as its own machine
-# (https://cashbook.<tailnet>.ts.net) and the app shares its network namespace.
-# Nothing listens on the host. Use together with the root compose file:
+# (https://<TS_HOSTNAME>.<tailnet>.ts.net, Funnel on 443) and the app shares its
+# network namespace. No port is published on the host. Use together with the root
+# compose file, from the repository root:
 #   docker compose -f docker-compose.yml -f examples/tailscale-sidecar/compose.yml up -d
-# Paths are relative to the first -f file (the repo root). Needs TS_CERT_DOMAIN in .env
-# (the full hostname, e.g. cashbook.owner.example.ts.net).
+#
+# The sidecar is still internet-facing: it sits on a named network with a fixed
+# subnet so firewall/cashbook-mcp-firewall.sh can keep it away from the host, the
+# LAN and the tailnet. Install that unit too (see README.md).
 services:
   tailscale:
     image: tailscale/tailscale:stable
-    hostname: cashbook
+    container_name: ${TS_CONTAINER_NAME:-cashbook-mcp-tailscale}
+    hostname: ${TS_HOSTNAME:-cashbook}
     restart: unless-stopped
     mem_limit: 512m
     environment:
-      TS_AUTHKEY_FILE: /secrets/ts-authkey
+      # "file:" makes tailscale read the key from the file (the container has
+      # no *_FILE variant for it). Only used on first login; the node identity is then
+      # kept in the state volume.
+      TS_AUTHKEY: file:/run/secrets/ts-authkey
+      TS_HOSTNAME: ${TS_HOSTNAME:-cashbook}
       TS_STATE_DIR: /var/lib/tailscale
+      # Userspace networking: no tun device, so the app has no route into the
+      # tailnet; serve/Funnel still proxy inbound HTTPS.
+      TS_USERSPACE: "true"
+      # ${TS_CERT_DOMAIN} in serve.json is filled in by the container itself.
       TS_SERVE_CONFIG: /config/serve.json
-      TS_CERT_DOMAIN: ${TS_CERT_DOMAIN}
     volumes:
       - tailscale-state:/var/lib/tailscale
       - ./examples/tailscale-sidecar/serve.json:/config/serve.json:ro
-      - ./secrets:/secrets:ro
+      - ./secrets/ts-authkey:/run/secrets/ts-authkey:ro
+    networks:
+      - cashbook
+    security_opt:
+      - no-new-privileges:true
 
   cashbook:
     network_mode: service:tailscale
@@ -27,5 +42,13 @@ services:
     restart: unless-stopped
     mem_limit: 512m
 
+networks:
+  cashbook:
+    name: ${NETWORK_NAME:-cashbook_mcp}
+    ipam:
+      config:
+        - subnet: ${SUBNET:-172.31.2.0/24}
+
 volumes:
   tailscale-state:
+    name: ${TS_STATE_VOLUME:-cashbook-mcp-tailscale}

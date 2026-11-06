@@ -56,7 +56,7 @@ docker compose up -d
 > `docker build -t cashbook-mcp:dev .`, use `cashbook-mcp:dev` in place of `ghcr.io/trainedloop/cashbook-mcp:0.1`
 > above, and point `image:` in `docker-compose.yml` at it.
 
-[examples/tailscale-sidecar/](examples/tailscale-sidecar/) shows a deployment where nothing listens on the host. [ROADMAP.md](ROADMAP.md) lists planned work.
+[examples/tailscale-sidecar/](examples/tailscale-sidecar/) shows a deployment with a Tailscale sidecar: its own hostname on port 443, no port published on the host, and a firewall unit that isolates the container. [ROADMAP.md](ROADMAP.md) lists planned work.
 
 ## Development
 

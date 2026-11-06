@@ -93,8 +93,20 @@ def test_ci_smoke_opens_database_in_the_image():
     assert "Database.open" in text
 
 
-def test_env_example_mentions_sidecar_cert_domain():
-    assert re.search(r"^# TS_CERT_DOMAIN=", (ROOT / ".env.example").read_text(), re.MULTILINE)
+def test_sidecar_reads_auth_key_with_file_prefix():
+    # containerboot has no TS_AUTHKEY_FILE; `tailscale up --auth-key` reads "file:<path>".
+    text = _compose("examples/tailscale-sidecar/compose.yml")
+    assert "TS_AUTHKEY_FILE" not in text
+    assert re.search(r"TS_AUTHKEY:\s*file:/", text)
+    assert re.search(r'TS_USERSPACE:\s*"true"', text)
+
+
+def test_sidecar_sits_on_the_firewalled_subnet():
+    compose = _compose("examples/tailscale-sidecar/compose.yml")
+    script = (ROOT / "examples/tailscale-sidecar/firewall/cashbook-mcp-firewall.sh").read_text()
+    subnet = re.search(r"SUBNET:-([0-9./]+)", compose).group(1)
+    assert f"SUBNETS:-{subnet}" in script
+    assert (ROOT / "examples/tailscale-sidecar/firewall/cashbook-mcp-firewall.service").exists()
 
 
 def test_readme_quick_start_has_local_build_note():

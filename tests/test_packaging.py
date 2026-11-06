@@ -113,3 +113,10 @@ def test_readme_quick_start_has_local_build_note():
     text = (ROOT / "README.md").read_text()
     quick = text[text.index("## Quick start") : text.index("## Development")]
     assert "docker build -t cashbook-mcp:dev ." in quick
+
+
+def test_workflows_install_httpfs_before_tests():
+    # The store never autoinstalls httpfs, so every job that runs pytest must install it first.
+    for path in (".github/workflows/ci.yml", ".github/workflows/release.yml"):
+        text = (ROOT / path).read_text()
+        assert text.index("INSTALL httpfs") < text.index("uv run pytest"), path

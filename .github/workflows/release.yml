@@ -23,6 +23,8 @@ jobs:
           test "v$version" = "$GITHUB_REF_NAME" || { echo "tag $GITHUB_REF_NAME != pyproject $version"; exit 1; }
       - uses: astral-sh/setup-uv@v7
       - run: uv sync --frozen
+      # The store loads httpfs explicitly and never autoinstalls it.
+      - run: uv run python -c "import duckdb; duckdb.connect().execute('INSTALL httpfs')"
       - run: uv run pytest -q
 
   image:

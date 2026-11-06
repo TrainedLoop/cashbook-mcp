@@ -146,17 +146,39 @@ class PluggyClient:
 
     async def list_transactions(self, account_id: str, date_from: date, date_to: date) -> list[dict]:
         rows: list[dict] = []
-        url: str | None = "/v2/transactions"
-        params: dict | None = {
+        query = {
             "accountId": account_id,
             "dateFrom": date_from.isoformat(),
             "dateTo": date_to.isoformat(),
         }
+        url: str | None = "/v2/transactions"
+        params: dict | None = query
+        seen: set[str] = set()
         while url:
             body = await self._request("GET", url, params=params)
             rows.extend(body.get("results", []))
-            url, params = body.get("next"), None  # `next` already carries its query
+            nxt = body.get("next")
+            if nxt is None or nxt == "":
+                return rows
+            if not isinstance(nxt, str):
+                raise PluggyError("Pluggy returned an invalid transactions `next` value")
+            if nxt in seen:
+                raise PluggyError("Pluggy repeated a transactions `next` cursor; stopping")
+            seen.add(nxt)
+            url, params = self._next_page(nxt, query)
         return rows
+
+    def _next_page(self, nxt: str, query: dict) -> tuple[str, dict | None]:
+        """Resolve a /v2/transactions `next`: a same-host path/URL, or a bare cursor."""
+        base = self._http.base_url
+        if nxt.startswith("/") and not nxt.startswith("//"):
+            return nxt, None  # a same-host path that already carries its query
+        if "://" in nxt or nxt.startswith("//"):
+            target = httpx.URL(nxt)
+            if (target.scheme, target.host, target.port) != (base.scheme, base.host, base.port):
+                raise PluggyError("Pluggy transactions `next` points to another host; refusing")
+            return target.raw_path.decode("ascii"), None
+        return "/v2/transactions", {**query, "after": nxt}
 
     async def list_bills(self, account_id: str) -> list[dict]:
         return await self._paged("/bills", {"accountId": account_id})

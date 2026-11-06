@@ -238,3 +238,79 @@ async def test_never_calls_deprecated_or_identity():
     assert not any(p.startswith(("/transactions", "/identity")) for p in paths)
     assert "/investments/inv/transactions" in paths
     assert all(r.method == "GET" for r in env.requests if r.url.path != "/auth")
+
+
+def _two_pages(next_value, check):
+    def handler(request):
+        if len([r for r in env.requests if r.url.path != "/auth"]) == 1:
+            body = dict(load("transactions_page1.json"), next=next_value)
+            return httpx.Response(200, json=body)
+        check(request)
+        return httpx.Response(200, json=load("transactions_page2.json"))
+
+    env = Env(handler)
+    return env
+
+
+async def test_v2_next_as_bare_cursor_keeps_query():
+    def check(request):
+        assert request.url.path == "/v2/transactions"
+        assert request.url.params["after"] == "cursor-xyz"
+        assert request.url.params["accountId"] == "acc-bank-1"
+        assert request.url.params["dateFrom"] == "2026-10-01"
+        assert request.url.params["dateTo"] == "2026-11-05"
+
+    env = _two_pages("cursor-xyz", check)
+    rows = await env.client().list_transactions("acc-bank-1", date(2026, 10, 1), date(2026, 11, 5))
+    assert len(rows) == 6
+    assert len(env.requests) == 3
+
+
+async def test_v2_next_as_path_is_requested_as_is():
+    def check(request):
+        assert request.url.host == "api.pluggy.ai"
+        assert request.url.path == "/v2/transactions"
+        assert dict(request.url.params) == {"accountId": "acc-bank-1", "after": "c2"}
+
+    env = _two_pages("/v2/transactions?accountId=acc-bank-1&after=c2", check)
+    rows = await env.client().list_transactions("acc-bank-1", date(2026, 10, 1), date(2026, 11, 5))
+    assert len(rows) == 6
+
+
+@pytest.mark.parametrize(
+    "next_value",
+    [
+        "https://evil.example.com/v2/transactions?after=c2",
+        "//evil.example.com/v2/transactions?after=c2",
+        "http://api.pluggy.ai/v2/transactions?after=c2",
+        {"after": "c2"},
+    ],
+)
+async def test_v2_next_to_another_host_is_rejected(next_value):
+    def check(request):
+        raise AssertionError(f"unexpected request to {request.url}")
+
+    env = _two_pages(next_value, check)
+    with pytest.raises(PluggyError, match="next"):
+        await env.client().list_transactions("acc-bank-1", date(2026, 10, 1), date(2026, 11, 5))
+    assert all(r.url.host == "api.pluggy.ai" for r in env.requests)
+
+
+async def test_v2_next_same_host_absolute_url_is_followed():
+    def check(request):
+        assert request.url.host == "api.pluggy.ai"
+        assert request.url.params["after"] == "c2"
+
+    env = _two_pages("https://api.pluggy.ai/v2/transactions?accountId=acc-bank-1&after=c2", check)
+    rows = await env.client().list_transactions("acc-bank-1", date(2026, 10, 1), date(2026, 11, 5))
+    assert len(rows) == 6
+
+
+async def test_v2_repeated_next_stops():
+    def handler(request):
+        return httpx.Response(200, json={"results": [{"id": "x"}], "next": "same-cursor"})
+
+    env = Env(handler)
+    with pytest.raises(PluggyError, match="repeat"):
+        await env.client().list_transactions("acc-bank-1", date(2026, 10, 1), date(2026, 11, 5))
+    assert len([r for r in env.requests if r.url.path != "/auth"]) == 2

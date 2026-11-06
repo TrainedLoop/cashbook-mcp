@@ -313,10 +313,11 @@ All tools are read-only. Every response includes `data_as_of` per connection and
 - **Secrets:**
   - `secrets/pluggy.json` (`clientId`, `clientSecret`);
   - `secrets/db.key`;
+  - `secrets/session.key`: the signing key for MCP tokens and admin session cookies;
   - `secrets/google-oauth.json`: a new Google Web OAuth client, used for the MCP connector and `/admin` login;
   - the Tailscale auth key, in the example only.
 - **`cashbook-admin`:**
-  - `init` generates `db.key`, checks the Pluggy credentials with `POST /auth`, and creates or migrates the database;
+  - `init` generates `db.key` and `session.key` when missing, checks the Pluggy credentials with `POST /auth`, and creates or migrates the database;
   - `status` shows connections, last syncs, errors and database info.
 - **Configuration:**
   - `ALLOWED_EMAILS`;

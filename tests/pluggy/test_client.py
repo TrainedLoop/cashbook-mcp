@@ -266,6 +266,28 @@ async def test_v2_next_as_bare_cursor_keeps_query():
     assert len(env.requests) == 3
 
 
+async def test_v2_next_as_query_string_takes_only_the_cursor():
+    # The shape Pluggy actually sends: a query string; its cursor is base64 with "=" padding.
+    def check(request):
+        assert request.url.path == "/v2/transactions"
+        assert dict(request.url.params) == {
+            "accountId": "acc-bank-1", "dateFrom": "2026-10-01", "dateTo": "2026-11-05", "after": "MjAy==",
+        }  # fmt: skip
+
+    env = _two_pages("?accountId=other&dateFrom=2026-10-01&dateTo=2026-11-05&after=MjAy%3D%3D", check)
+    rows = await env.client().list_transactions("acc-bank-1", date(2026, 10, 1), date(2026, 11, 5))
+    assert len(rows) == 6
+
+
+async def test_v2_next_query_string_without_cursor_is_rejected():
+    def check(request):
+        raise AssertionError(f"unexpected request to {request.url}")
+
+    env = _two_pages("?accountId=acc-bank-1", check)
+    with pytest.raises(PluggyError, match="after"):
+        await env.client().list_transactions("acc-bank-1", date(2026, 10, 1), date(2026, 11, 5))
+
+
 async def test_v2_next_as_path_is_requested_as_is():
     def check(request):
         assert request.url.host == "api.pluggy.ai"

@@ -183,7 +183,7 @@ def recurring_changes(
         if direction == "out" and pairs:
             dupes = {r[0] for _, r in pairs}
             series = sorted(_cluster([r for r in rows if r[0] not in dupes]), key=lambda r: (r[1], r[0]))
-            if len(series) >= 3:
+            if len(series) >= 3:  # find_recurring's min_occurrences=3 definition of a series
                 stats = _series(series)
                 if (
                     stats["cadence"] >= _DUPLICATE_CADENCE

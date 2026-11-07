@@ -182,6 +182,7 @@ def test_old_double_charge_is_not_reported(db, today, add_row):
 def test_equal_inflows_are_not_duplicates(db, today, add_row):
     for n, d in enumerate([date(2026, 1, 24), date(2026, 2, 24), date(2026, 3, 24), date(2026, 3, 26)]):
         add_row(f"in-{n}", "main", "acc-main", d, "300.00", "Rent Income", "income", counterpart="Tenant")
+    assert _changes(db, today, "duplicate") == []
 
 
 def test_price_increase_recency_boundary(db, add_row):

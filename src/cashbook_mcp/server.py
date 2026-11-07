@@ -393,7 +393,7 @@ def create_mcp(
         "Changes in recurring charges and incomes over the last `months` months: price_increase (latest "
         "charge more than 5% and 1.00 above its usual amount, seen within 1.5 cadences), new (a regular series that started in the "
         "last 60 days), stopped (a series past due by more than half a cadence, expected within the last 90 days) and "
-        "duplicate (outflow of a monthly-or-slower series charged twice with the same amount within 3 days, "
+        "duplicate (outflow of a series with a cadence of 20 days or more charged twice with the same amount within 3 days, "
         "in the last 35 days). Each change carries evidence_ids. Candidates only: decide "
         "from the evidence." + SCOPE_NOTE + UNTRUSTED_NOTE
     ))  # fmt: skip

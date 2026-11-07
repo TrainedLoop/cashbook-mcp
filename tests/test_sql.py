@@ -679,12 +679,32 @@ def test_busy_when_workers_are_taken(db, monkeypatch):
     monkeypatch.setattr(sql_module, "_workers", sem)
     sem.acquire()
     try:
+        start = time.monotonic()
         with pytest.raises(SqlRejected) as exc:
-            run_query(db, "SELECT 1")
+            run_query(db, "SELECT 1", timeout_s=0.3)
         assert exc.value.reason == "busy"
+        assert time.monotonic() - start >= 0.3
     finally:
         sem.release()
     assert run_query(db, "SELECT 1").rows == [[1]]
+
+
+def test_parallel_queries_beyond_the_cap_wait_for_a_slot(db):
+    n = MAX_WORKERS * 3
+    results: list = [None] * n
+
+    def ask(i: int) -> None:
+        try:
+            results[i] = run_query(db, f"SELECT {i} AS n, count(*) FROM range(2000000)").rows
+        except SqlRejected as e:
+            results[i] = e.reason
+
+    threads = [threading.Thread(target=ask, args=(i,)) for i in range(n)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results == [[[i, 2000000]] for i in range(n)]
 
 
 def test_timed_out_worker_releases_its_slot(db):

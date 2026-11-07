@@ -43,9 +43,11 @@ TRUNCATED_SUFFIX = "…[truncated]"
 
 # Grace period for the worker to roll back and close after an interrupt.
 _INTERRUPT_GRACE_S = 5.0
-# Query workers alive at once. A worker that ignores the interrupt keeps its
-# slot until it ends, so stuck queries cannot pile up threads without bound.
-MAX_WORKERS = 2
+# Query workers alive at once. Callers beyond it wait for a slot (up to their
+# timeout), so parallel tool calls queue instead of failing. A worker that
+# ignores the interrupt keeps its slot until it ends, so stuck queries cannot
+# pile up threads without bound.
+MAX_WORKERS = 4
 _workers = threading.BoundedSemaphore(MAX_WORKERS)
 _MAX_MESSAGE_CHARS = 300
 _FETCH_BATCH = 64
@@ -429,7 +431,7 @@ def run_query(
     statement = _check(sql)
     inner = _bounded_sql(sql, statement)
 
-    if not _workers.acquire(blocking=False):
+    if not _workers.acquire(timeout=timeout_s):
         raise SqlRejected("busy", "other queries are still running; retry shortly")
     try:
         cur = db.read()

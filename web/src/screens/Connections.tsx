@@ -42,13 +42,21 @@ export default function Connections({ disconnecting, onDisconnect, onConnect, on
 
   // Saves one select on change; on failure the select keeps its previous value and the error shows beside it.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState<Set<string>>(new Set());
   async function save(key: string, fn: () => Promise<unknown>, apply: (c: Connection) => Connection) {
+    setSaving((s) => new Set(s).add(key));
     setFieldErrors((m) => ({ ...m, [key]: "" }));
     try {
       await fn();
       setRows((rs) => rs && rs.map(apply));
     } catch (e) {
       setFieldErrors((m) => ({ ...m, [key]: errorMessage(e) }));
+    } finally {
+      setSaving((s) => {
+        const n = new Set(s);
+        n.delete(key);
+        return n;
+      });
     }
   }
   const saveRole = (alias: string, role: Role) =>
@@ -94,6 +102,9 @@ export default function Connections({ disconnecting, onDisconnect, onConnect, on
                 <select
                   aria-label={`Role for ${c.alias}`}
                   value={c.role}
+                  disabled={saving.has(`role:${c.alias}`)}
+                  aria-invalid={!!fieldErrors[`role:${c.alias}`]}
+                  aria-describedby={fieldErrors[`role:${c.alias}`] ? `err-role-${c.alias}` : undefined}
                   onChange={(e) => void saveRole(c.alias, e.target.value as Role)}
                 >
                   <option value="personal">Personal</option>
@@ -101,7 +112,7 @@ export default function Connections({ disconnecting, onDisconnect, onConnect, on
                 </select>
               </label>
               {fieldErrors[`role:${c.alias}`] && (
-                <p role="alert" className="error">{fieldErrors[`role:${c.alias}`]}</p>
+                <p role="alert" id={`err-role-${c.alias}`} className="error">{fieldErrors[`role:${c.alias}`]}</p>
               )}
               <dl className="facts">
                 <div><dt>Last sync</dt><dd>{formatTime(c.last_synced_at)}</dd></div>
@@ -124,6 +135,9 @@ export default function Connections({ disconnecting, onDisconnect, onConnect, on
                           <select
                             aria-label={`Account type for ${a.name}`}
                             value={a.purpose ?? "regular"}
+                            disabled={saving.has(`purpose:${a.id}`)}
+                            aria-invalid={!!fieldErrors[`purpose:${a.id}`]}
+                            aria-describedby={fieldErrors[`purpose:${a.id}`] ? `err-purpose-${a.id}` : undefined}
                             onChange={(e) => void savePurpose(a.id, e.target.value as Purpose)}
                           >
                             <option value="regular">Regular</option>
@@ -132,7 +146,7 @@ export default function Connections({ disconnecting, onDisconnect, onConnect, on
                         </label>
                       )}
                       {fieldErrors[`purpose:${a.id}`] && (
-                        <p role="alert" className="error">{fieldErrors[`purpose:${a.id}`]}</p>
+                        <p role="alert" id={`err-purpose-${a.id}`} className="error">{fieldErrors[`purpose:${a.id}`]}</p>
                       )}
                     </li>
                   ))}

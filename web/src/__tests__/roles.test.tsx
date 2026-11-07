@@ -89,6 +89,39 @@ describe("role and purpose selectors", () => {
     expect(screen.getByLabelText("Role for nubank")).toHaveValue("personal");
   });
 
+  it("disables the select while its save is in flight", async () => {
+    const user = userEvent.setup();
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => (release = r));
+    const base = fetch as unknown as (u: string, i?: RequestInit) => Promise<Response>;
+    vi.stubGlobal("fetch", vi.fn(async (u: string, i?: RequestInit) => {
+      if (i?.method === "PATCH") {
+        await gate;
+        return reply(200, { alias: "nubank", role: "business" });
+      }
+      return base(u, i);
+    }));
+    render(<App />);
+    const select = await screen.findByLabelText("Role for nubank");
+    await user.selectOptions(select, "business");
+    await waitFor(() => expect(select).toBeDisabled());
+    release();
+    await waitFor(() => expect(select).toBeEnabled());
+    expect(select).toHaveValue("business");
+  });
+
+  it("keeps the previous purpose and flags the select on failure", async () => {
+    const user = userEvent.setup();
+    patchReply = () => reply(422, { error: "purpose_invalid" });
+    render(<App />);
+    const select = await screen.findByLabelText("Account type for Conta");
+    await user.selectOptions(select, "investment");
+    expect(await screen.findByText("That account type is not valid.")).toBeInTheDocument();
+    expect(select).toHaveValue("regular");
+    expect(select).toHaveAttribute("aria-invalid", "true");
+    expect(select).toHaveAccessibleDescription("That account type is not valid.");
+  });
+
   it("add existing sends the suggested role", async () => {
     const user = userEvent.setup();
     render(<App />);

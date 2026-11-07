@@ -1,11 +1,13 @@
 """One-call snapshot of the user's finances."""
 
 from datetime import date, timedelta
+from decimal import Decimal
 
 from cashbook_mcp.store.db import Database
 
 from .filters import jsonable
 from .metrics import totals
+from .networth import net_worth
 from .summarize import cash_flow, list_categories
 
 
@@ -16,6 +18,22 @@ def _dicts(cur, sql: str, params: list | None = None) -> list[dict]:
         {n: jsonable(v) for n, v in zip(names, row, strict=True)}
         for row in result.fetchall()
     ]
+
+
+def _net_worth_block(db: Database, today: date) -> dict:
+    """Current personal net worth and its change since the last day of the previous month.
+
+    change_this_month is null when no point exists for that day (estimated or not).
+    """
+
+    def net_on(day: date) -> Decimal | None:
+        points = net_worth(db, today, date_from=day, date_to=day, granularity="day")["points"]
+        return Decimal(points[0]["net"]) if points else None
+
+    current = net_on(today)
+    before = net_on(today.replace(day=1) - timedelta(days=1))
+    change = current - before if current is not None and before is not None else None
+    return {"current": jsonable(current), "change_this_month": jsonable(change)}
 
 
 def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
@@ -60,6 +78,7 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
         "top_categories": list_categories(db, month_start, today)[:5],
         "connections_with_problems": problems,
     }
+    overview["net_worth"] = _net_worth_block(db, today)
     if has_business:
         business = totals(db, month_start, today, "business")
         overview["business"] = {k: jsonable(business[k]) for k in ("income", "spending", "owner_draws")}

@@ -106,7 +106,7 @@ async def test_tools_read_only_annotations(server):
     async with Client(server) as c:
         tools = await c.list_tools()
     assert {t.name for t in tools} == ALL_TOOL_NAMES
-    assert len(ALL_TOOL_NAMES) == 15
+    assert len(ALL_TOOL_NAMES) == 16
     for t in tools:
         assert t.annotations is not None and t.annotations.read_only_hint is True, t.name
 
@@ -164,6 +164,7 @@ async def test_every_tool_answers_with_connection_context(server):
         ("list_categories", {"date_from": "2026-03-01", "date_to": "2026-03-31"}),
         ("summarize_transactions", {"group_by": "category", "compare_previous": True}),
         ("cash_flow", {"date_from": "2026-01-01", "date_to": "2026-03-31"}),
+        ("net_worth", {}),
         ("find_recurring", {"months": 6}),
         ("describe_schema", {}),
         ("query_sql", {"sql": "SELECT count(*) AS n FROM v_transactions"}),

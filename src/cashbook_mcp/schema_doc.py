@@ -175,6 +175,20 @@ COLUMN_DOCS: dict[str, dict[str, str]] = {
         "transactions get kind investment (kind_reason investment_account) and it is not spending. "
         "No row means regular.",
     },
+    "balance_snapshots": {
+        "day": "Snapshot day (local date); one row per account per day, written by each sync.",
+        "account_id": "Account (v_accounts.id).",
+        "alias": _ROW_META["alias"],
+        "balance": "Account balance on that day (for CREDIT, the amount owed).",
+        "currency": "ISO currency code, e.g. BRL.",
+    },
+    "investment_snapshots": {
+        "day": "Snapshot day (local date); one row per investment per day, written by each sync.",
+        "investment_id": "Investment (v_investments.id).",
+        "alias": _ROW_META["alias"],
+        "balance": "Investment balance on that day.",
+        "currency": "ISO currency code, e.g. BRL.",
+    },
     "sync_runs": {
         "id": "Sync run id.",
         "alias": "Connection alias synced.",

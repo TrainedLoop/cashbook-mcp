@@ -24,6 +24,7 @@ from cashbook_mcp.admin_web.identity import GoogleIdentity
 from cashbook_mcp.analysis import listing
 from cashbook_mcp.analysis.filters import TxFilters, today_in
 from cashbook_mcp.analysis.metrics import Scope
+from cashbook_mcp.analysis.networth import net_worth as _net_worth
 from cashbook_mcp.analysis.overview import finance_overview as _finance_overview
 from cashbook_mcp.analysis.recurring import find_recurring as _find_recurring
 from cashbook_mcp.analysis.search import get_transactions as _get_transactions
@@ -49,7 +50,7 @@ log = logging.getLogger("cashbook-mcp")
 ALL_TOOL_NAMES = frozenset({
     "finance_overview", "list_connections", "list_accounts", "search_transactions", "get_transactions",
     "list_bills", "list_investments", "get_investment_transactions", "list_loans", "list_categories",
-    "summarize_transactions", "cash_flow", "find_recurring", "describe_schema", "query_sql",
+    "summarize_transactions", "cash_flow", "net_worth", "find_recurring", "describe_schema", "query_sql",
 })  # fmt: skip
 
 READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
@@ -339,6 +340,29 @@ def create_mcp(
     ) -> dict:
         return await respond(
             lambda: _cash_flow(db, date_from, date_to, granularity, by_account, today=today(), scope=scope)
+        )
+
+    @mcp.tool(annotations=READ_ONLY, description=(
+        "Net worth series: assets (bank balances plus investments), liabilities (credit card balances plus "
+        "loan outstanding balances) and net, with a bank/investment/card/loan breakdown per point. Points "
+        "are the last day of each period (day, week or month; default: last 12 months to today, monthly). "
+        "Balances come from daily snapshots kept since the first sync; bank balances before an account's "
+        "first snapshot are estimated from transactions (estimated=true). history_starts gives the first "
+        "snapshot date per component; loans appear only on today's point. Only BRL is summed; "
+        "`excluded_foreign` counts items in other currencies. finance_overview reports net_worth.current and "
+        "change_this_month (current net minus net on the last day of the previous month; null if no point "
+        "exists for that day)." + SCOPE_NOTE + DATES_NOTE
+    ))  # fmt: skip
+    async def net_worth(
+        scope: Scope = "personal",
+        date_from: date | None = None,
+        date_to: date | None = None,
+        granularity: Literal["day", "week", "month"] = "month",
+    ) -> dict:
+        return await respond(
+            lambda: _net_worth(
+                db, today(), scope=scope, date_from=date_from, date_to=date_to, granularity=granularity
+            )
         )
 
     @mcp.tool(annotations=READ_ONLY, description=(

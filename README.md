@@ -28,6 +28,7 @@ Every response carries `data_as_of` per connection and any connection problem.
 | `list_loans` | Loans and installments |
 | `list_categories` | Categories present in the data |
 | `summarize_transactions`, `cash_flow` | Aggregations by scope (`personal`, `business`, `consolidated`), by one or two dimensions |
+| `list_changes` | What changed since a cursor (new, updated, removed), for routines that resume where they stopped |
 | `net_worth`, `cash_forecast` | Net worth over time; projected cash balance for the next 30 to 90 days |
 | `find_recurring`, `recurring_changes` | Recurring-charge candidates; price increases, new, stopped and duplicate charges |
 | `review_classification` | Queue of transactions the server is unsure about, with hints |

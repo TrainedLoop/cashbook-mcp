@@ -64,7 +64,8 @@ def _fetch_groups(
 
     With a scope, rows come from v_flows filtered by connection role, BRL only.
     """
-    marks = ", ".join("?" * len(INTERNAL_KINDS))
+    skipped = (*INTERNAL_KINDS, "one_off")
+    marks = ", ".join("?" * len(skipped))
     view, extra, extra_params = "v_transactions", "", []
     if scope is not None:
         clause, extra_params = scope_clause(scope)
@@ -80,7 +81,7 @@ def _fetch_groups(
     cur = db.read()
     try:
         fetched = cur.execute(
-            sql, [months_ago(today, months), today, *INTERNAL_KINDS, *extra_params]
+            sql, [months_ago(today, months), today, *skipped, *extra_params]
         ).fetchall()
     finally:
         cur.close()

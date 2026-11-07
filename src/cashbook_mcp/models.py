@@ -15,6 +15,7 @@ Kind = Literal[
     "fee",
     "loan",
     "other",
+    "one_off",
 ]
 KINDS: tuple[str, ...] = (
     "purchase",
@@ -26,6 +27,7 @@ KINDS: tuple[str, ...] = (
     "fee",
     "loan",
     "other",
+    "one_off",
 )
 
 Role = Literal["personal", "business"]

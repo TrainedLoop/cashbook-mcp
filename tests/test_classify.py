@@ -96,6 +96,12 @@ def test_category_map():
     assert "credit card payment" in CATEGORY_KINDS
 
 
+def test_mutual_funds_are_investments_in_both_directions():
+    for amount in ("500.00", "-500.00"):
+        r = one(tx(amount=amount, pluggy_category="Mutual funds"))
+        assert (r.kind, r.kind_reason) == ("investment", "pluggy_category:Mutual funds")
+
+
 def test_sign_fallback():
     r = one(tx(amount="5.00"))
     assert (r.kind, r.kind_reason) == ("income", "sign")

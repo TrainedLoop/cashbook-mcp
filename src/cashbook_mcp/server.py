@@ -464,9 +464,9 @@ def create_mcp(
         "describe_schema; category: one of the valid categories, case-insensitive). Give at least one. Changes "
         "only the local label in this store, never the bank. A category changes only the label used by groupings "
         "and filters (summaries, list_categories), never the kind or the totals; a category override does not "
-        "change how the kind is classified. Categories must come from the valid list: the categories already in "
-        "the store (see list_categories) plus Rent, Housing, Utilities, Education and Childcare; an unknown one "
-        "is rejected with bad_category and valid_categories. Ask the owner first when unsure. Reversible with "
+        "change how the kind is classified. Categories must come from the valid list: the categories in use "
+        "(list_categories shows those) plus Rent, Housing, Utilities, Education and Childcare; an unknown one "
+        "is rejected with bad_category and the full valid_categories list. Ask the owner first when unsure. Reversible with "
         "undo_reclassification using the returned change_id. All ids must be live transactions or nothing is "
         "changed; a daily cap applies (a transaction changed in both fields counts once). Returns change_id, "
         "count (ids actually changed) and, per id, old/new kind and/or old/new category (only the fields "
@@ -514,8 +514,10 @@ def create_mcp(
         "account number, else name), largest first. Each group has a reason (unpaired_transfer, "
         "large_unidentified_inflow, uncategorized_card_credit, same_payee_recategorized: no category set yet "
         "although the same counterpart has one on other transactions), its transactions, total and a hint: the "
-        "kinds and categories I used earlier for the same counterpart (a suggestion, never applied). Transactions already "
-        "reclassified are left out. Ask the owner, then use reclassify_transactions (kind and/or category). Up to `limit` groups (1 to 100)."
+        "kinds and categories I used earlier for the same counterpart (a suggestion, never applied). Transactions with a "
+        "manual category are left out of same_payee_recategorized and, for the other reasons, those with a manual "
+        "kind. Ask the owner, then use reclassify_transactions (kind and/or category). Up to `limit` groups "
+        "(1 to 100)."
         + DATES_NOTE + SCOPE_NOTE + UNTRUSTED_NOTE
     ))  # fmt: skip
     async def review_classification(

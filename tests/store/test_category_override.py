@@ -28,6 +28,7 @@ ROWS = [  # id, category, amount
     ("t-2", "Entrepreneurial activities", "-1500.00"),
     ("t-3", "Groceries", "-40.00"),
     ("t-4", None, "-5.00"),
+    ("t-5", "", "-7.00"),
 ]
 
 
@@ -131,13 +132,13 @@ def test_undo_removes_only_its_category_overrides(db):
 
 
 def test_bad_and_empty_category(db):
-    for bad in ("Nonsense", ""):
+    for bad in ("Nonsense", "", "   "):
         with pytest.raises(ReclassifyError) as e:
             run(db, ["t-1"], category=bad)
         assert e.value.code == "bad_category"
         valid = e.value.details["valid_categories"]
         assert valid == sorted(valid)
-        assert {"Groceries", "Entrepreneurial activities", *EXTRA_CATEGORIES} == set(valid)
+        assert {"Groceries", "Entrepreneurial activities", *EXTRA_CATEGORIES} == set(valid)  # no "" from t-5
     assert one(db, "SELECT count(*) FROM classification_changes") == [(0,)]
 
 
@@ -176,7 +177,8 @@ def test_summaries_use_effective_category_and_add_up(db):
     f = TxFilters(date_from=date(2026, 3, 1), date_to=date(2026, 3, 31))
     cats = {c["category"]: c["total"] for c in list_categories(db, f.date_from, f.date_to)}
     assert cats == {
-        "Rent": "1500.00", "Entrepreneurial activities": "1500.00", "Groceries": "40.00", "uncategorized": "5.00",
+        "Rent": "1500.00", "Entrepreneurial activities": "1500.00", "Groceries": "40.00",
+        "uncategorized": "5.00", "": "7.00",
     }
     flow = cash_flow(db, f.date_from, f.date_to, today=date(2026, 3, 31))
     assert sum(Decimal(v) for v in cats.values()) == Decimal(flow["totals"]["spending"])
@@ -210,3 +212,16 @@ def test_override_on_removed_row_is_harmless(db):
         cur.execute("UPDATE transactions SET removed_at = ? WHERE id = 't-1'", [SEEN])
     assert len(list_changes(db)) == 1
     assert undo(db, out["change_id"], now=NOW)["reverted"] == 1
+
+
+def test_back_to_provider_category_deletes_the_override(db):
+    a = run(db, ["t-1"], category="Rent")
+    out = run(db, ["t-1"], category="entrepreneurial activities")
+    assert out["count"] == 1  # still a journaled change
+    assert out["changes"] == [
+        {"id": "t-1", "old_category": "Rent", "new_category": "Entrepreneurial activities"}
+    ]
+    assert one(db, "SELECT count(*) FROM category_overrides") == [(0,)]
+    assert flow_row(db, "t-1")[2] is False
+    assert len(list_changes(db)) == 2
+    assert undo(db, a["change_id"], now=NOW)["reverted"] == 0

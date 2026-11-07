@@ -109,7 +109,7 @@ Steps:
 3. Only for what I confirmed, call reclassify_transactions(ids=[...], kind=..., category=...) with the
    transaction ids of that group and a short note. You may propose a kind change, a category change or
    both; a category only relabels the transaction in groupings and never changes the kind or the totals,
-   and it must come from the valid list (list_categories shows it, and an error returns it). Leave
+   and it must come from the valid list (list_categories shows the ones in use; a bad_category error returns the full list). Leave
    anything I did not confirm or am unsure about untouched.
 4. At the end report each change_id, the kind and/or category, the number of transactions changed and
    what was left out.

@@ -213,3 +213,21 @@ def test_prompt_mentions_categories():
     text = prompts.review_classifications()
     assert "category" in text and "same_payee_recategorized" in text
     assert "never apply" in text
+
+
+def test_same_payee_recategorized_ignores_the_other_direction(db, add_row):
+    _row(db, add_row, "old", "-1500.00", "purchase", "sign", category="Business", tax="11122233344")
+    _category(db, "old")
+    _row(db, add_row, "refund", "300.00", "refund", "sign", category="Business", counterpart="ACME Imóveis",
+         tax="11122233344")
+    _row(db, add_row, "new", "-1500.00", "purchase", "sign", category="Business", tax="11122233344")
+    (g,) = _groups(db)
+    assert [t["id"] for t in g["transactions"]] == ["new"]
+
+
+def test_third_party_transfers_reach_the_queue(db, add_row):
+    _row(db, add_row, "p1", "40.00", "income", "sign", category="Third party transfers", counterpart="Ana  Souza")
+    _row(db, add_row, "p2", "25.00", "income", "sign", category="Third party transfers", counterpart="ana souza")
+    (g,) = _groups(db)
+    assert g["reason"] == "unpaired_transfer"
+    assert [t["id"] for t in g["transactions"]] == ["p1", "p2"]  # grouped by normalized name

@@ -41,7 +41,7 @@ Prompts: `monthly_review`, `subscriptions_audit`, `upcoming_bills`, `review_clas
 ## Security model, in short
 
 - The server never changes anything at Pluggy. Its only non-GET calls are `POST /auth` and `POST /connect_token`.
-- Locally there is one write path: the assistant can set the kind of specific transactions. Every change is journaled, reversible and capped per day.
+- Locally there is one write path: the assistant can set the kind and/or category of specific transactions. Every change is journaled, reversible and capped per day.
 - Only a verified Google login listed in `ALLOWED_EMAILS` can use the connector or `/admin`.
 - `query_sql` allows one `SELECT`/`WITH` statement, parsed by DuckDB, on a locked-down reader connection: no files, network, extensions, `ATTACH` or writes. 10 s timeout, 1,000 rows.
 - Transaction text is written by third parties (anyone can send you a PIX with a message). It is cleaned, capped and wrapped in untrusted markers when suspicious, and the tool descriptions say it is data, not instructions.

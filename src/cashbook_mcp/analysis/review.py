@@ -34,11 +34,18 @@ def _digits(value: str | None) -> str:
     return _DIGITS.sub("", value or "")
 
 
+def _is_transfer_like(category: str | None) -> bool:
+    """Review-only: the classifier's transfer categories plus Pluggy's "Third party transfers"."""
+    return _is_transfer_category(category) or (category or "").strip().lower().startswith(
+        "third party transfer"
+    )
+
+
 def _reason(row: dict, min_amount: Decimal) -> str | None:
     kind, why, category = row["kind"], row["kind_reason"], row["pluggy_category_original"]
     if row["kind_overridden"]:
         return None
-    if kind in ("income", "purchase") and why == "sign" and _is_transfer_category(category):
+    if kind in ("income", "purchase") and why == "sign" and _is_transfer_like(category):
         return "unpaired_transfer"
     if kind == "income" and why == "sign" and row["amount"] >= min_amount:
         return "large_unidentified_inflow"
@@ -47,9 +54,9 @@ def _reason(row: dict, min_amount: Decimal) -> str | None:
     return None
 
 
-def _same_payee(row: dict, by_tax: dict, by_acct: dict) -> dict[str, str]:
-    """Live category overrides on the row's counterpart, as {transaction id: category}."""
-    matched: dict[str, str] = {}  # union by override, so one matching both keys counts once
+def _same_payee(row: dict, by_tax: dict, by_acct: dict) -> dict[str, tuple[str, bool]]:
+    """Live overrides on the row's counterpart, as {transaction id: (value, is inflow)}."""
+    matched: dict[str, tuple[str, bool]] = {}  # union by override, so one matching both keys counts once
     if tax := _digits(row["counterpart_tax_id"]):
         matched |= by_tax.get(tax, {})
     if acct := (row["counterpart_account_number"] or "").strip():
@@ -67,22 +74,23 @@ def _group_key(row: dict) -> tuple[str, str]:
     return "tx", row["id"]
 
 
-def _overrides(cur, table: str, column: str) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
-    """Live overrides ({transaction id: value}) per counterpart tax id digits and per account number.
+def _overrides(cur, table: str, column: str) -> tuple[dict[str, dict], dict[str, dict]]:
+    """Live overrides ({transaction id: (value, is inflow)}) per counterpart tax id and account number.
 
     `table` and `column` come from fixed call sites, never from callers.
     """
-    by_tax: dict[str, dict[str, str]] = {}
-    by_acct: dict[str, dict[str, str]] = {}
+    by_tax: dict[str, dict] = {}
+    by_acct: dict[str, dict] = {}
     cur.execute(
-        f"SELECT o.transaction_id, o.{column}, t.counterpart_tax_id, t.counterpart_account_number "
+        f"SELECT o.transaction_id, (o.{column}, t.amount > 0), t.counterpart_tax_id, "
+        "t.counterpart_account_number "
         f"FROM {table} o JOIN v_transactions t ON t.id = o.transaction_id"
     )
-    for tx_id, value, tax, acct in cur.fetchall():
+    for tx_id, (value, inflow), tax, acct in cur.fetchall():
         if d := _digits(tax):
-            by_tax.setdefault(d, {})[tx_id] = value
+            by_tax.setdefault(d, {})[tx_id] = (value, inflow)
         if a := (acct or "").strip():
-            by_acct.setdefault(a, {})[tx_id] = value
+            by_acct.setdefault(a, {})[tx_id] = (value, inflow)
     return by_tax, by_acct
 
 
@@ -120,10 +128,14 @@ def review_classification(
     buckets: dict[tuple[str, tuple[str, str]], list[dict]] = {}
     for row in rows:
         reason = _reason(row, min_amount)
-        # The counterpart was recategorized before; unless this row already carries one of those
-        # categories, the agent may want to apply the same one.
+        # The counterpart was recategorized before (same direction only, so a refund from a payee is
+        # not queued with its rent); unless this row already carries one of those categories, the
+        # agent may want to apply the same one.
         if reason is None and not row["category_overridden"]:
-            cats = set(_same_payee(row, cats_tax, cats_acct).values())
+            cats = {
+                c for c, inflow in _same_payee(row, cats_tax, cats_acct).values()
+                if inflow == (row["amount"] > 0)
+            }
             if cats and row["pluggy_category"] not in cats:
                 reason = "same_payee_recategorized"
         if reason:
@@ -133,9 +145,9 @@ def review_classification(
     for (reason, (_, _key)), members in buckets.items():
         first = members[0]
         hint = {}
-        if kinds := Counter(_same_payee(first, kinds_tax, kinds_acct).values()):
+        if kinds := Counter(k for k, _ in _same_payee(first, kinds_tax, kinds_acct).values()):
             hint["kinds"] = dict(kinds)
-        if cats := Counter(_same_payee(first, cats_tax, cats_acct).values()):
+        if cats := Counter(c for c, _ in _same_payee(first, cats_tax, cats_acct).values()):
             hint["categories"] = dict(cats)
         named = next((m for m in members if m["counterpart_name"]), first)
         groups.append({

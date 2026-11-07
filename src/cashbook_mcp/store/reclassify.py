@@ -62,7 +62,7 @@ def _valid_categories(cur) -> dict[str, str]:
     valid: dict[str, str] = {}
     stored = cur.execute(
         "SELECT DISTINCT pluggy_category FROM transactions "
-        "WHERE removed_at IS NULL AND pluggy_category IS NOT NULL ORDER BY 1"
+        "WHERE removed_at IS NULL AND trim(pluggy_category) <> '' ORDER BY 1"
     ).fetchall()
     for name in [r[0] for r in stored] + list(EXTRA_CATEGORIES):
         valid.setdefault(name.lower(), name)
@@ -100,7 +100,7 @@ def reclassify(
         marks = ", ".join("?" for _ in ids)
         if category is not None:
             valid = _valid_categories(cur)
-            if category.lower() not in valid:
+            if not category.strip() or category.lower() not in valid:
                 raise ReclassifyError(
                     "bad_category",
                     "category must be one of valid_categories; nothing was changed",
@@ -171,6 +171,11 @@ def reclassify(
                 "change_id = excluded.change_id",
                 [[i, live[i][0], kind, change_id] for i in kind_todo],
             )
+        # Back to the provider's category: drop the override instead of storing one equal to it.
+        restored = [i for i in cat_todo if live[i][2] == category]
+        cat_todo = [i for i in cat_todo if i not in restored]
+        if restored:
+            cur.executemany("DELETE FROM category_overrides WHERE transaction_id = ?", [[i] for i in restored])
         if cat_todo:
             cur.executemany(
                 "INSERT INTO category_overrides (transaction_id, alias, category, change_id) VALUES (?, ?, ?, ?) "

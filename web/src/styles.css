@@ -124,3 +124,5 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .preview { margin-bottom: 8px; }
 .footer { color: var(--muted); font-size: 0.9rem; padding: 8px 0; }
 .footer dl { margin: 0; }
+.check { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; font-weight: 600; }
+.check input { width: 20px; min-height: 20px; height: 20px; margin: 0; accent-color: var(--primary); }

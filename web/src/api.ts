@@ -41,9 +41,15 @@ export interface ConnectTokenResponse {
 }
 export interface ItemPreview {
   item_id: string;
-  connector_name: string;
+  bank: string;
   status: string | null;
   accounts: { name: string; type: string | null; number: string | null }[];
+}
+/** A preview from discover: `alias` when already connected, `error` when it cannot be added. */
+export interface FoundItem extends Omit<ItemPreview, "bank"> {
+  bank: string | null;
+  alias: string | null;
+  error: string | null;
 }
 export interface DisconnectImpact {
   alias: string;
@@ -115,8 +121,10 @@ export const api = {
     return cached;
   },
   connections: () => call<{ connections: Connection[] }>("GET", "/admin/api/connections"),
-  connectToken: (alias: string) => call<ConnectTokenResponse>("POST", "/admin/api/connect-token", { alias }),
+  connectToken: () => call<ConnectTokenResponse>("POST", "/admin/api/connect-token"),
   preview: (itemId: string) => call<ItemPreview>("POST", "/admin/api/connections/preview", { item_id: itemId }),
+  discover: (itemIds: string[]) =>
+    call<{ items: FoundItem[] }>("POST", "/admin/api/connections/discover", { item_ids: itemIds }),
   addConnection: (alias: string, itemId: string) =>
     call<{ alias: string; started: boolean }>("POST", "/admin/api/connections", { alias, item_id: itemId }),
   reload: (alias?: string) =>
@@ -128,7 +136,50 @@ export const api = {
   logout: () => call<{ signed_out: boolean }>("POST", "/admin/auth/logout"),
 };
 
+const PLUGGY_API = "https://api.pluggy.ai";
+const ITEM_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
+
+/**
+ * The MeuPluggy items that already exist for this application. Pluggy does not list items on
+ * personal accounts, but a connect token issued with avoidDuplicates refuses a second MeuPluggy
+ * item and names the existing ones; this asks for one and reads the refusal. Call it only once an
+ * item is known to exist (after the widget succeeded or was refused): with none, Pluggy would
+ * create a pending item. Any other answer gives an empty list.
+ */
+export async function existingItemIds(connectToken: string, connectorId: number): Promise<string[]> {
+  try {
+    const res = await fetch(`${PLUGGY_API}/items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-API-KEY": connectToken },
+      body: JSON.stringify({ connectorId, parameters: {} }),
+    });
+    if (res.status !== 400) return [];
+    const data = (await res.json()) as { codeDescription?: unknown; data?: { items?: unknown } } | null;
+    const items = data?.codeDescription === "ITEM_USER_ALREADY_EXISTS" ? data.data?.items : null;
+    return Array.isArray(items) ? items.filter((i): i is string => typeof i === "string" && ITEM_ID_RE.test(i)) : [];
+  } catch {
+    return [];
+  }
+}
+
 export const ALIAS_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+/** An alias derived from a bank name ("BANCO INTER" -> "inter"), not in `taken`. */
+export function suggestAlias(bank: string | null, taken: Set<string>): string {
+  let base = (bank ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/^banco-(?=.)/, "")
+    .slice(0, 28)
+    .replace(/-+$/, "");
+  if (!ALIAS_RE.test(base)) base = "bank";
+  let alias = base;
+  for (let n = 2; taken.has(alias); n++) alias = `${base}-${n}`;
+  return alias;
+}
 
 /** Trim and lowercase an alias; null when it does not match the server's rule. */
 export function normalizeAlias(raw: string): string | null {

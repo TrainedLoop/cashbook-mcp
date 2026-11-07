@@ -58,7 +58,7 @@ class SyncResult:
 @dataclass
 class ItemPreview:
     item_id: str
-    connector_name: str
+    bank: str
     status: str | None
     accounts: list[dict]
 
@@ -109,6 +109,20 @@ def _mask(number: str | None) -> str | None:
 def _error_text(exc: BaseException) -> str:
     text = str(exc) or type(exc).__name__
     return text[:_ERROR_CHARS]
+
+
+def _bank_name(item: dict, accounts: list[tuple[Any, Any]]) -> str:
+    """The bank behind an item, from (type, name) pairs of its accounts. Every MeuPluggy item has
+    the MeuPluggy connector, so the connector name says nothing: the first checking account names
+    the bank, else the first account, else the connector."""
+    names = [(kind, prepare_text(name)) for kind, name in accounts]
+    for kind, name in names:
+        if name and kind == "BANK":
+            return name
+    for _, name in names:
+        if name:
+            return name
+    return prepare_text((item.get("connector") or {}).get("name")) or ""
 
 
 def _status_fields(item: dict) -> dict[str, Any]:
@@ -302,6 +316,9 @@ class Syncer:
             "last_synced_at = ?, last_sync_error = NULL WHERE alias = ?",
             [*status.values(), _parse_ts(snap.item.get("lastUpdatedAt")), now, snap.alias],
         )
+        if snap.accounts:  # without accounts the stored name is better than the fallback
+            bank = _bank_name(snap.item, [(a.type, a.name) for a in snap.accounts])
+            cur.execute("UPDATE connections SET connector_name = ? WHERE alias = ?", [bank, snap.alias])
         cur.execute(
             "INSERT INTO sync_runs (alias, started_at, finished_at, outcome, rows_upserted, "
             "rows_removed) VALUES (?, ?, ?, 'ok', ?, ?)",
@@ -414,7 +431,7 @@ class Syncer:
         accounts = await self._client.list_accounts(item_id)
         return ItemPreview(
             item_id=item_id,
-            connector_name=prepare_text((item.get("connector") or {}).get("name")) or "",
+            bank=_bank_name(item, [(a.get("type"), a.get("name")) for a in accounts]),
             status=item.get("status"),
             accounts=[
                 {
@@ -433,6 +450,10 @@ class Syncer:
             raise ValidationError("alias_invalid")
         self._check_free(alias, item_id)
         item = await self._fetch_item(item_id)
+        try:
+            accounts = await self._client.list_accounts(item_id)
+        except PluggyError:  # only the bank name needs them, and the first load sets it again
+            accounts = []
         now = self._now_utc()
         with self._db.write() as cur:
             # Re-checked inside the write: another add may have won meanwhile.
@@ -445,7 +466,7 @@ class Syncer:
                 [
                     alias,
                     item_id,
-                    prepare_text((item.get("connector") or {}).get("name")) or "",
+                    _bank_name(item, [(a.get("type"), a.get("name")) for a in accounts]),
                     now,
                     *status.values(),
                 ],

@@ -73,7 +73,7 @@ export default function AddExisting({ onDone, onCancel }: Props) {
       {error && <p role="alert" className="error">{error}</p>}
       {preview && (
         <div className="preview">
-          <p><strong>{preview.connector_name}</strong></p>
+          <p><strong>{preview.bank}</strong></p>
           <ul>
             {preview.accounts.map((a, i) => (
               <li key={i}>{a.name}{a.number ? ` (${a.number})` : ""}</li>

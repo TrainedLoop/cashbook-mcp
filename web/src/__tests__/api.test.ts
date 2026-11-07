@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError, resetSession } from "../api";
+import { api, ApiError, existingItemIds, resetSession, suggestAlias } from "../api";
 
 function reply(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -24,10 +24,10 @@ function callFor(method: string, url: string) {
 
 describe("api CSRF", () => {
   it("sends X-CSRF-Token on POST", async () => {
-    await api.connectToken("nubank");
+    await api.connectToken();
     const init = callFor("POST", "/admin/api/connect-token");
     expect((init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("tok123");
-    expect(init.body).toBe(JSON.stringify({ alias: "nubank" }));
+    expect(init.body).toBeUndefined();
     expect(init.credentials).toBe("same-origin");
   });
 
@@ -42,7 +42,9 @@ describe("api CSRF", () => {
     await api.reload("nubank");
     await api.addConnection("nubank", "it1");
     await api.preview("it1");
+    await api.discover(["it1"]);
     for (const [m, u] of [
+      ["POST", "/admin/api/connections/discover"],
       ["POST", "/admin/api/reload"],
       ["POST", "/admin/api/connections/nubank/reload"],
       ["POST", "/admin/api/connections"],
@@ -65,7 +67,7 @@ describe("api errors", () => {
     fetchMock.mockImplementation(async (url: string) =>
       url === "/admin/api/session" ? reply(200, { email: "e", csrf: "t", reauth_fresh: true }) : reply(422, { error: "alias_taken" }),
     );
-    const err = await api.connectToken("x").catch((e) => e);
+    const err = await api.connectToken().catch((e) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect(err.status).toBe(422);
     expect(err.code).toBe("alias_taken");
@@ -87,5 +89,47 @@ describe("api errors", () => {
     const err = await api.disconnect("nubank").catch((e) => e);
     expect(err.code).toBe("reauth_required");
     expect(assign).toHaveBeenCalledWith("/admin/auth/login?next=%2Fadmin");
+  });
+});
+
+describe("existingItemIds", () => {
+  it("reads the item ids from Pluggy's duplicate refusal", async () => {
+    fetchMock.mockImplementation(async () =>
+      reply(400, { code: 400, codeDescription: "ITEM_USER_ALREADY_EXISTS", data: { items: ["a-1", "b-2", 7, "../x"] } }),
+    );
+    expect(await existingItemIds("ct-1", 200)).toEqual(["a-1", "b-2"]);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe("https://api.pluggy.ai/items");
+    expect((init.headers as Record<string, string>)["X-API-KEY"]).toBe("ct-1");
+    expect(init.body).toBe(JSON.stringify({ connectorId: 200, parameters: {} }));
+    expect(init.credentials).toBeUndefined();
+  });
+
+  it("gives an empty list for any other answer", async () => {
+    fetchMock.mockImplementation(async () => reply(400, { codeDescription: "OTHER", data: { items: ["a-1"] } }));
+    expect(await existingItemIds("ct-1", 200)).toEqual([]);
+    fetchMock.mockImplementation(async () => reply(201, { id: "new" }));
+    expect(await existingItemIds("ct-1", 200)).toEqual([]);
+    fetchMock.mockImplementation(async () => {
+      throw new TypeError("network");
+    });
+    expect(await existingItemIds("ct-1", 200)).toEqual([]);
+  });
+});
+
+describe("suggestAlias", () => {
+  it("derives a short alias from the bank name", () => {
+    const none = new Set<string>();
+    expect(suggestAlias("BANCO INTER", none)).toBe("inter");
+    expect(suggestAlias("C6 BANK", none)).toBe("c6-bank");
+    expect(suggestAlias("Caixa Econômica", none)).toBe("caixa-economica");
+    expect(suggestAlias("XP", none)).toBe("xp");
+    expect(suggestAlias("Banco", none)).toBe("banco");
+    expect(suggestAlias("", none)).toBe("bank");
+    expect(suggestAlias(null, none)).toBe("bank");
+  });
+
+  it("avoids taken aliases", () => {
+    expect(suggestAlias("XP", new Set(["xp", "xp-2"]))).toBe("xp-3");
   });
 });

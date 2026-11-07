@@ -77,6 +77,8 @@ Counterpart names, descriptions and payment messages are written by third partie
 
 The Pluggy client makes GET requests plus `POST /auth` (API key) and `POST /connect_token` (the Connect widget). Nothing else is sent. `GET /v2/transactions` is used; the deprecated `GET /transactions` and `GET /identity` are never called.
 
+Connecting banks runs in the owner's browser, with the short-lived connect token. MeuPluggy shares each bank linked there as its own item, all under one login. The widget creates them the first time. Pluggy cannot list items on personal accounts, and once one MeuPluggy item exists, the `avoidDuplicates` token makes Pluggy refuse a new one (`ITEM_USER_ALREADY_EXISTS`) and name the existing ids. After the widget succeeds or fails, the SPA repeats that request (`POST /items` with the connect token, the same call the widget makes) only to read those ids, then sends them to `POST /admin/api/connections/discover`, which validates each one like any other item. The owner picks an alias per bank.
+
 ## Threat model
 
 Defended: unauthenticated access, prompt injection through transaction text, agent-written SQL, CSRF and replayed callbacks on `/admin`, foreign Pluggy items, theft of the disk or of a copy of the database file.

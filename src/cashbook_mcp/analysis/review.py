@@ -13,6 +13,7 @@ from .metrics import Scope, scope_clause
 from .recurring import _normalize_key
 
 _DIGITS = re.compile(r"\D+")
+MAX_LIMIT = 100  # groups per call
 _COLUMNS = (
     "id, date, amount, alias, pluggy_category, kind, kind_reason, "
     "counterpart_name, counterpart_tax_id, counterpart_account_number"
@@ -127,7 +128,7 @@ def review_classification(
             "hint": {"kinds": dict(counts)} if counts else None,
         })  # fmt: skip
     groups.sort(key=lambda g: (-abs(g["total"]), g["transactions"][0]["id"]))
-    groups = groups[: max(1, int(limit))]
+    groups = groups[: min(MAX_LIMIT, max(1, int(limit)))]
     for g in groups:
         g["total"] = jsonable(g["total"])
     return {"scope": scope, "groups": groups}

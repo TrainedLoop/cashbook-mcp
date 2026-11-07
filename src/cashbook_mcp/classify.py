@@ -43,6 +43,8 @@ CATEGORY_KINDS: dict[str, Kind] = {
 # is firmer and kept.
 _GUESSED_KINDS = frozenset({"income", "purchase", "refund"})
 _PAIR_WINDOW = timedelta(days=3)
+# Manual kinds that may be one side of a pair; any other manual kind rules the pair out.
+_MANUAL_PAIR_KINDS = frozenset({"internal_transfer", "card_bill_payment", "investment"})
 
 _TOLERANCE = Decimal("0.01")
 _BEFORE_DUE = timedelta(days=10)
@@ -94,8 +96,15 @@ def _guessed(t: Transaction) -> bool:
     return t.kind in _GUESSED_KINDS and not (t.kind_reason or "").startswith("manual:")
 
 
+def _manual_non_transfer(t: Transaction) -> bool:
+    """The owner set a kind that is not a movement between own accounts: never a pair side."""
+    return (t.kind_reason or "").startswith("manual:") and t.kind not in _MANUAL_PAIR_KINDS
+
+
 def _pair_kind(out: Transaction, inn: Transaction, by_id: dict[str, Account]) -> Kind | None:
     """The kind both sides of a candidate pair take, or None if they must not pair."""
+    if _manual_non_transfer(out) or _manual_non_transfer(inn):
+        return None
     out_type, in_type = by_id[out.account_id].type, by_id[inn.account_id].type
     if not _guessed(out) and not _guessed(inn):
         return None  # nothing to fix

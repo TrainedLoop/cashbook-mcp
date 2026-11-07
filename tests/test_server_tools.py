@@ -14,6 +14,7 @@ from cashbook_mcp import server as server_module
 from cashbook_mcp.auth import AllowlistGoogleProvider
 from cashbook_mcp.config import DEFAULT_REDIRECT_URIS, Secrets, Settings
 from cashbook_mcp.content import wrap_suspicious
+from cashbook_mcp.models import KINDS
 from cashbook_mcp.pluggy.client import PluggyError
 from cashbook_mcp.presenter import SUSPICIOUS_NOTE
 from cashbook_mcp.server import (
@@ -469,6 +470,13 @@ async def test_reclassify_tools_and_error_shape(tmp_path):
         assert again["error"] == "already_undone"
     finally:
         db.close()
+
+
+async def test_reclassify_schema_lists_kinds(server):
+    async with Client(server) as c:
+        tool = next(t for t in await c.list_tools() if t.name == "reclassify_transactions")
+    schema = tool.input_schema["properties"]["kind"]
+    assert set(schema["enum"]) == set(KINDS)
 
 
 async def test_summarize_schema_exposes_group_by_values(server):

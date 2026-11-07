@@ -560,15 +560,17 @@ class Syncer:
             cur.execute("UPDATE connections SET role = ? WHERE alias = ?", [role, alias])
 
     def set_purpose(self, account_id: str, purpose: Purpose) -> None:
-        """Mark an account as regular or investment, then reclassify in the same write."""
+        """Mark a bank account as regular or investment, then reclassify in the same write."""
         if purpose not in PURPOSES:
             raise ValidationError("purpose_invalid")
         with self._db.write() as cur:
             row = cur.execute(
-                "SELECT alias FROM accounts WHERE id = ? AND removed_at IS NULL", [account_id]
+                "SELECT alias, type FROM accounts WHERE id = ? AND removed_at IS NULL", [account_id]
             ).fetchone()
             if row is None:
                 raise LookupError(f"unknown account {account_id!r}")
+            if row[1] != "BANK":
+                raise ValidationError("purpose_invalid")  # only bank accounts have a purpose
             if purpose == "regular":
                 cur.execute("DELETE FROM account_settings WHERE account_id = ?", [account_id])
             else:
@@ -585,6 +587,8 @@ class Syncer:
                 for table in _ALIAS_TABLES:
                     cur.execute(f"DELETE FROM {table} WHERE alias = ?", [alias])
                 cur.execute("DELETE FROM connections WHERE alias = ?", [alias])
+                # Rows of other connections may point at deleted ones (paired_with, matched bills).
+                self._reclassify(cur)
 
     def disconnect_impact(self, alias: str) -> DisconnectImpact:
         start, _ = self._window()

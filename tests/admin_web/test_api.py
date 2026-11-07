@@ -315,6 +315,14 @@ def test_set_purpose_bad_value_is_422(env, body):
     assert env.syncer.calls == []
 
 
+def test_set_purpose_on_a_card_is_422(env):
+    env.login()
+    env.syncer.errors["set_purpose"] = ValidationError("purpose_invalid")
+    resp = env.send("PATCH", "/admin/api/accounts/card-main", {"purpose": "investment"})
+    assert resp.status_code == 422
+    assert resp.json() == {"error": "purpose_invalid"}
+
+
 def test_set_purpose_unknown_account_is_404(env):
     env.login()
     env.syncer.errors["set_purpose"] = LookupError("unknown account")

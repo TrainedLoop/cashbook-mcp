@@ -101,6 +101,15 @@ def test_grouping_ordering_limit_and_dates(db, add_row):
     assert [[t["id"] for t in g["transactions"]] for g in groups] == [["b1"], ["a1", "a2"], ["n2"], ["n1"]]
     assert [g["total"] for g in groups][:2] == ["-500.00", "-170.00"]
     assert len(_groups(db, limit=2)) == 2
+    assert len(_groups(db, limit=0)) == 1
+    assert len(_groups(db, limit=-5)) == 1
+
+
+def test_limit_is_capped_at_100(db, add_row):
+    for n in range(105):
+        _row(db, add_row, f"x{n}", f"-{10 + n}.00", "purchase", "sign", category="Transfers",
+             counterpart="Payee " + chr(97 + n // 26) + chr(97 + n % 26))  # fmt: skip
+    assert len(_groups(db, limit=500)) == 100
     assert [g["transactions"][0]["id"] for g in _groups(db, date_from=date(2026, 3, 11))] == []
 
 

@@ -374,6 +374,10 @@ def test_describe_schema_lists_views_and_notes(db):
     # Raw tables reuse the view docs.
     raw = {c["name"]: c for c in by_name["transactions"]["columns"]}
     assert raw["amount"]["description"] == tx_cols["amount"]["description"]
+    # The reclassification tables are documented too.
+    for table in ("classification_changes", "classification_overrides"):
+        for col in by_name[table]["columns"]:
+            assert col["description"], (table, col["name"])
     # Every view column is documented.
     for view in VIEWS:
         for col in by_name[view]["columns"]:

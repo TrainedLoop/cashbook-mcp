@@ -294,6 +294,17 @@ def test_pairing_never_rewrites_manual_side_but_uses_it():
     assert by["out"] == ("internal_transfer", "paired_with:in")
 
 
+def test_manual_non_transfer_side_never_pairs():
+    accounts = [acct(), acct("a2", "other", number="0002-2")]
+    inn = tx("in", amount="50.00", account_id="a2", pluggy_category="Transfer - PIX")
+    out = tx("out", amount="-50.00", account_id="a1", pluggy_category="Transfer - PIX")
+    res = classify([out, inn], accounts, [], overrides={"in": ("income", "c1")})
+    by = {t.id: (t.kind, t.kind_reason) for t in res}
+    # The owner said the inflow is income: the outflow is not its other side.
+    assert by["in"] == ("income", "manual:c1")
+    assert by["out"] == ("purchase", "sign")
+
+
 def test_override_for_missing_transaction_is_ignored():
     r = classify([tx()], ACCOUNTS, [], overrides={"gone": ("income", "c1")})[0]
     assert (r.kind, r.kind_reason) == ("purchase", "sign")

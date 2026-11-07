@@ -323,6 +323,26 @@ async def test_disconnect_deletes_all_alias_rows(syncer, fake, db):
     assert [c.alias for c in syncer.connections()] == ["b"]
 
 
+async def test_disconnect_reclassifies_the_other_connections(syncer, fake, db):
+    fake.add_item("item-a")
+    fake.add_item("item-b")
+    fake.transactions["item-a-bank"].append(
+        {"id": "out", "date": iso("2026-10-01"), "amount": -500.0, "description": "Transfer out",
+         "currencyCode": "BRL", "category": "Transfers"}
+    )
+    fake.add_tx("item-b-bank", "in", "2026-10-01", amount=500.0)
+    await syncer.add_connection("a", "item-a")
+    await syncer.add_connection("b", "item-b")
+    assert rows(db, "SELECT kind, kind_reason FROM transactions WHERE id = 'in'") == [
+        ("internal_transfer", "paired_with:out")
+    ]
+
+    await syncer.disconnect("a")
+
+    # The paired side is gone, so the remaining one no longer points at it.
+    assert rows(db, "SELECT kind, kind_reason FROM transactions WHERE id = 'in'") == [("income", "sign")]
+
+
 async def test_disconnect_during_load_discards(syncer, fake, db):
     fake.add_item("item-a")
     fake.add_tx("item-a-bank", "tx-a", "2026-10-01")
@@ -582,6 +602,16 @@ async def test_set_purpose_upserts_and_deletes_regular(syncer, fake, db):
         cur.execute("UPDATE accounts SET removed_at = TIMESTAMP '2026-11-06 10:00:00'")
     with pytest.raises(LookupError):
         syncer.set_purpose("item-a-bank", "investment")
+
+
+async def test_set_purpose_rejects_card_accounts(syncer, fake, db):
+    fake.add_item("item-a")
+    await syncer.add_connection("a", "item-a")
+    for purpose in ("investment", "regular"):
+        with pytest.raises(ValidationError) as e:
+            syncer.set_purpose("item-a-card", purpose)
+        assert e.value.code == "purpose_invalid"
+    assert rows(db, "SELECT count(*) FROM account_settings") == [(0,)]
 
 
 async def test_set_purpose_reclassifies(syncer, fake, db):

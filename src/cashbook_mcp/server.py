@@ -41,6 +41,7 @@ from cashbook_mcp.analysis.summarize import (
 from cashbook_mcp.auth import build_auth
 from cashbook_mcp.config import ConfigError, Secrets, Settings, load_secrets
 from cashbook_mcp.content import clean_text
+from cashbook_mcp.models import Kind
 from cashbook_mcp.pluggy.client import PluggyClient
 from cashbook_mcp.presenter import present
 from cashbook_mcp.sql import SqlRejected, run_query
@@ -459,14 +460,14 @@ def create_mcp(
         return {"error": e.code, "message": str(e), **e.details}
 
     @mcp.tool(annotations=WRITE, description=(
-        "Change the kind of up to 200 transactions (kind: one of the values in describe_schema). Changes only "
+        "Change the kind of up to 200 transactions (kind: one of the listed values; see describe_schema). Changes only "
         "the local label in this store, never the bank. Ask the owner first when unsure. Reversible with "
         "undo_reclassification using the returned change_id. All ids must be live transactions or nothing is "
         "changed; a daily cap applies. Returns change_id, count (ids actually changed) and old/new kinds. "
         "When nothing changes (every id already has that kind), change_id is null and count is 0. "
         "A rejected call returns error and message instead."
     ))  # fmt: skip
-    async def reclassify_transactions(ids: list[str], kind: str, note: str | None = None) -> dict:
+    async def reclassify_transactions(ids: list[str], kind: Kind, note: str | None = None) -> dict:
         def work() -> dict:
             try:
                 return _reclassify.reclassify(
@@ -504,7 +505,7 @@ def create_mcp(
         "account number, else name), largest first. Each group has a reason (unpaired_transfer, "
         "large_unidentified_inflow, uncategorized_card_credit), its transactions, total and a hint: the kinds "
         "I used earlier for the same counterpart (a suggestion, never applied). Transactions already "
-        "reclassified are left out. Ask the owner, then use reclassify_transactions. Up to `limit` groups."
+        "reclassified are left out. Ask the owner, then use reclassify_transactions. Up to `limit` groups (1 to 100)."
         + DATES_NOTE + SCOPE_NOTE + UNTRUSTED_NOTE
     ))  # fmt: skip
     async def review_classification(

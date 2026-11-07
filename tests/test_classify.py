@@ -137,3 +137,114 @@ def test_card_payment_needs_bill_of_same_account():
     assert one(tx(amount="500.00", account_id="c1", d=date(2026, 3, 10)), [other]).kind == "refund"
     near = card_bill(total="500.02")
     assert one(tx(amount="500.00", account_id="c1", d=date(2026, 3, 10)), [near]).kind == "refund"
+
+
+# -- category map additions ---------------------------------------------------
+
+
+def test_category_map_covers_pluggy_categories_seen_in_real_data():
+    assert one(tx(amount="0.12", pluggy_category="Automatic investment")).kind == "investment"
+    assert one(tx(amount="-50.00", pluggy_category="Automatic investment")).kind == "investment"
+    assert one(tx(amount="-80.00", pluggy_category="Income taxes")).kind == "fee"
+    assert one(tx(amount="-3.10", pluggy_category="Tax on financial operations")).kind == "fee"
+    assert one(tx(amount="900.00", pluggy_category="Same person transfer")).kind == "internal_transfer"
+    assert one(tx(amount="1557.12", pluggy_category="Blocked balances")).kind == "internal_transfer"
+    assert one(tx(amount="-1557.12", pluggy_category="Blocked balances")).kind == "internal_transfer"
+
+
+# -- pairing across own accounts ------------------------------------------------
+
+BANKS = [
+    acct("a1", "main", number="0001-1"),
+    acct("a2", "other", number="0002-2"),
+    acct("c1", "card", "CREDIT", number=None),
+]
+
+
+def run(*txs, bills=()):
+    out = classify(list(txs), BANKS, list(bills))
+    return {t.id: (t.kind, t.kind_reason) for t in out}
+
+
+def test_transfer_with_one_side_recognized_pairs_the_other():
+    # The sending bank names the owner; the receiving bank names nobody.
+    out = tx("o", "-10000.00", date(2026, 3, 10), "a1", counterpart_tax_id=OWN_TAX,
+             pluggy_category="Transfer - PIX")
+    inn = tx("i", "10000.00", date(2026, 3, 11), "a2", pluggy_category="Transfer - PIX")
+    got = run(out, inn)
+    assert got["o"] == ("internal_transfer", "counterpart_is_owner_tax_id")
+    assert got["i"] == ("internal_transfer", "paired_with:o")
+
+
+def test_transfer_with_neither_side_recognized_pairs_on_transfer_category():
+    out = tx("o", "-7000.00", date(2026, 3, 10), "a1", pluggy_category="Transfers")
+    inn = tx("i", "7000.00", date(2026, 3, 10), "a2", pluggy_category="Transfer - TED")
+    assert run(out, inn) == {
+        "o": ("internal_transfer", "paired_with:i"),
+        "i": ("internal_transfer", "paired_with:o"),
+    }
+
+
+def test_same_amount_without_transfer_evidence_is_not_paired():
+    # A purchase and a payment received that merely share an amount and a day.
+    out = tx("o", "-100.00", date(2026, 3, 10), "a1", pluggy_category="Groceries")
+    inn = tx("i", "100.00", date(2026, 3, 10), "a2")
+    assert run(out, inn) == {"o": ("purchase", "sign"), "i": ("income", "sign")}
+
+
+def test_bank_payment_into_card_pairs_as_bill_payment():
+    out = tx("o", "-154.75", date(2026, 11, 3), "a1", pluggy_category="Transfers")
+    inn = tx("i", "154.75", date(2026, 11, 4), "c1")
+    assert run(out, inn) == {
+        "o": ("card_bill_payment", "paired_with:i"),
+        "i": ("card_bill_payment", "paired_with:o"),
+    }
+
+
+def test_card_purchase_never_pairs_with_bank_inflow():
+    out = tx("o", "-50.00", date(2026, 3, 10), "c1", pluggy_category="Transfers")
+    inn = tx("i", "50.00", date(2026, 3, 10), "a1", pluggy_category="Transfer - PIX")
+    assert run(out, inn) == {"o": ("purchase", "sign"), "i": ("income", "sign")}
+
+
+def test_pairing_window_and_same_account():
+    out = tx("o", "-300.00", date(2026, 3, 10), "a1", pluggy_category="Transfers")
+    late = tx("late", "300.00", date(2026, 3, 14), "a2", pluggy_category="Transfers")
+    same = tx("same", "300.00", date(2026, 3, 10), "a1", pluggy_category="Transfers")
+    got = run(out, late, same)
+    assert got["late"] == ("income", "sign")
+    assert got["same"] == ("income", "sign")
+    assert got["o"] == ("purchase", "sign")
+    edge = tx("edge", "300.00", date(2026, 3, 13), "a2", pluggy_category="Transfers")
+    assert run(out, edge)["edge"] == ("internal_transfer", "paired_with:o")
+
+
+def test_each_transaction_pairs_once_closest_date_first():
+    out = tx("o", "-500.00", date(2026, 3, 10), "a1", pluggy_category="Transfers")
+    far = tx("far", "500.00", date(2026, 3, 12), "a2", pluggy_category="Transfers")
+    near = tx("near", "500.00", date(2026, 3, 10), "a2", pluggy_category="Transfers")
+    got = run(out, far, near)
+    assert got["o"] == ("internal_transfer", "paired_with:near")
+    assert got["near"] == ("internal_transfer", "paired_with:o")
+    assert got["far"] == ("income", "sign")
+
+
+def test_bill_match_and_category_kinds_are_kept():
+    # Sides with a firmer classification keep it; only the guessed side changes.
+    out = tx("o", "-1234.56", date(2026, 3, 10), "a1")
+    inn = tx("i", "1234.56", date(2026, 3, 10), "c1")
+    got = run(out, inn, bills=[bill()])
+    assert got["o"] == ("card_bill_payment", "matched_card_bill:b1")
+    assert got["i"][0] == "card_bill_payment"
+    inv = tx("inv", "-200.00", date(2026, 3, 10), "a1", pluggy_category="Investments")
+    back = tx("back", "200.00", date(2026, 3, 10), "a2", pluggy_category="Transfers")
+    got = run(inv, back)
+    assert got["inv"] == ("investment", "pluggy_category:Investments")
+    # Money that left another own account is not income, whatever that side was.
+    assert got["back"] == ("internal_transfer", "paired_with:inv")
+
+
+def test_pairing_requires_same_currency():
+    out = tx("o", "-10.00", date(2026, 3, 10), "a1", pluggy_category="Transfers")
+    inn = tx("i", "10.00", date(2026, 3, 10), "a2", pluggy_category="Transfers", currency="USD")
+    assert run(out, inn)["i"] == ("income", "sign")

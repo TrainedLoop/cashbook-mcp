@@ -1,4 +1,9 @@
-"""Rule-based transaction kind classification. Pure; first matching rule wins."""
+"""Rule-based transaction kind classification. Pure.
+
+Each transaction is classified on its own (first matching rule wins), then a
+second pass pairs transfers between the owner's accounts whose sides were
+classified apart (one bank names the owner, the other names nobody).
+"""
 
 import re
 from dataclasses import replace
@@ -22,7 +27,19 @@ CATEGORY_KINDS: dict[str, Kind] = {
     "financing": "loan",
     "loans and financing": "loan",
     "credit card payment": "card_bill_payment",
+    "automatic investment": "investment",
+    "income taxes": "fee",
+    "tax on financial operations": "fee",
+    "same person transfer": "internal_transfer",
+    # Money held and later released inside the same account.
+    "blocked balances": "internal_transfer",
 }
+
+# Kinds set only by a fallback (the sign, or any credit on a card): pairing may
+# replace them. Everything else (bill matches, owner matches, category kinds)
+# is firmer and kept.
+_GUESSED_KINDS = frozenset({"income", "purchase", "refund"})
+_PAIR_WINDOW = timedelta(days=3)
 
 _TOLERANCE = Decimal("0.01")
 _BEFORE_DUE = timedelta(days=10)
@@ -43,7 +60,65 @@ def classify(
     by_id = {a.id: a for a in accounts}
     tax_ids = {d for a in accounts if (d := _digits(a.owner_tax_id))}
     numbers = {a.number: a.alias for a in accounts if a.number is not None}
-    return [_classify_one(t, by_id, tax_ids, numbers, bills) for t in transactions]
+    classified = [_classify_one(t, by_id, tax_ids, numbers, bills) for t in transactions]
+    return _pair_own_transfers(classified, by_id)
+
+
+def _is_transfer_category(category: str | None) -> bool:
+    c = (category or "").strip().lower()
+    return c.startswith(("transfer", "same person transfer"))
+
+
+def _pair_kind(out: Transaction, inn: Transaction, by_id: dict[str, Account]) -> Kind | None:
+    """The kind both sides of a candidate pair take, or None if they must not pair."""
+    out_type, in_type = by_id[out.account_id].type, by_id[inn.account_id].type
+    if out.kind not in _GUESSED_KINDS and inn.kind not in _GUESSED_KINDS:
+        return None  # nothing to fix
+    if out_type == "BANK" and in_type == "CREDIT":
+        return "card_bill_payment"  # an exact credit on the card is the payment
+    if out_type == "BANK" and in_type == "BANK":
+        # Two accounts can share an amount and a day by chance: one side must
+        # already look like a transfer.
+        evidence = (
+            "internal_transfer" in (out.kind, inn.kind)
+            or _is_transfer_category(out.pluggy_category)
+            or _is_transfer_category(inn.pluggy_category)
+        )
+        return "internal_transfer" if evidence else None
+    return None  # card outflows are purchases, never the sending side
+
+
+def _pair_own_transfers(
+    transactions: list[Transaction], by_id: dict[str, Account]
+) -> list[Transaction]:
+    """Pair an outflow of one own account with the same inflow in another, within
+    _PAIR_WINDOW, closest dates first; each transaction pairs at most once. Only
+    guessed sides are rewritten, with kind_reason paired_with:<other id>."""
+    own = [t for t in transactions if t.account_id in by_id]
+    outs = [t for t in own if t.amount < 0]
+    ins_by_key: dict[tuple, list[Transaction]] = {}
+    for t in own:
+        if t.amount > 0:
+            ins_by_key.setdefault((t.amount, t.currency), []).append(t)
+    candidates = []
+    for o in outs:
+        for i in ins_by_key.get((-o.amount, o.currency), ()):
+            gap = abs(i.date - o.date)
+            if i.account_id == o.account_id or gap > _PAIR_WINDOW:
+                continue
+            if (kind := _pair_kind(o, i, by_id)) is not None:
+                candidates.append((gap, o.date, o.id, i.id, kind, o, i))
+    candidates.sort(key=lambda c: c[:4])
+    taken: set[str] = set()
+    rewritten: dict[str, Transaction] = {}
+    for _, _, oid, iid, kind, o, i in candidates:
+        if oid in taken or iid in taken:
+            continue
+        taken.update((oid, iid))
+        for side, other in ((o, iid), (i, oid)):
+            if side.kind in _GUESSED_KINDS:
+                rewritten[side.id] = replace(side, kind=kind, kind_reason=f"paired_with:{other}")
+    return [rewritten.get(t.id, t) for t in transactions]
 
 
 def _classify_one(

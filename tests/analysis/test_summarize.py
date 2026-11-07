@@ -1,6 +1,8 @@
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from cashbook_mcp.analysis.filters import TxFilters
 from cashbook_mcp.analysis.summarize import (
     cash_flow,
@@ -190,3 +192,58 @@ def test_signed_compare_previous_carries_split(db, today):
     f = TxFilters(date_from=MARCH.date_from, date_to=MARCH.date_to, kinds=["internal_transfer"])
     g = summarize_transactions(db, f, "kind", compare_previous=True, today=today)["groups"][0]
     assert g["previous"] == {"total": "0.00", "count": 0, "average": "0.00", "in": "0.00", "out": "0.00"}
+
+
+def _many_merchants(add_row, n=30):
+    for i in range(n):
+        add_row(
+            f"m-{i}", "main", "acc-main", date(2026, 3, 1 + i % 20), f"-{10 + i}.00",
+            f"Shop {i}", "purchase", merchant=f"Merchant {i:02d}",
+        )  # fmt: skip
+
+
+def test_summarize_top_n_keeps_total(db, add_row, today):
+    _many_merchants(add_row)
+    f = TxFilters(date_from=date(2026, 3, 1), date_to=date(2026, 3, 31), text="Shop")
+    full = summarize_transactions(db, f, "merchant", today=today, limit=200)["groups"]
+    top = summarize_transactions(db, f, "merchant", today=today, limit=5)["groups"]
+    assert len(full) == 30
+    assert len(top) == 6
+    assert top[-1]["key"] == "others"
+    assert top[-1]["groups"] == 25
+    assert sum(Decimal(g["total"]) for g in top) == sum(Decimal(g["total"]) for g in full)
+    assert top[-1]["count"] == 25
+
+
+def test_others_carries_previous(db, add_row, today):
+    _many_merchants(add_row)
+    add_row("p-1", "main", "acc-main", date(2026, 2, 10), "-7.00", "Shop old", "purchase",
+            merchant="Merchant 00")  # fmt: skip
+    f = TxFilters(date_from=date(2026, 3, 1), date_to=date(2026, 3, 31), text="Shop")
+    res = summarize_transactions(db, f, "merchant", True, today=today, limit=1)["groups"]
+    assert res[-1]["key"] == "others"
+    assert res[-1]["previous"]["total"] == "7.00"
+
+
+def test_time_grouping_not_limited(db, today):
+    f = TxFilters(date_from=date(2025, 10, 1), date_to=date(2026, 3, 31))
+    res = summarize_transactions(db, f, "month", today=today, limit=2)["groups"]
+    assert len(res) == 6
+    assert all(g["key"] != "others" for g in res)
+
+
+def test_two_dimension_top_n(db, add_row, today):
+    _many_merchants(add_row)
+    f = TxFilters(date_from=date(2026, 3, 1), date_to=date(2026, 3, 31), text="Shop")
+    full = summarize_transactions(db, f, ["merchant", "category"], today=today, limit=200)["groups"]
+    top = summarize_transactions(db, f, ["merchant", "category"], today=today, limit=4)["groups"]
+    assert len(top) == 5
+    assert top[-1]["key"] == "others"
+    assert top[-1]["groups"] == len(full) - 4
+    assert sum(Decimal(g["total"]) for g in top) == sum(Decimal(g["total"]) for g in full)
+
+
+def test_limit_bounds(db, today):
+    for bad in (0, 201, -1):
+        with pytest.raises(ValueError):
+            summarize_transactions(db, TxFilters(), "category", today=today, limit=bad)

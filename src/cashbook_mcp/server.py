@@ -32,6 +32,7 @@ from cashbook_mcp.analysis.recurring import recurring_changes as _recurring_chan
 from cashbook_mcp.analysis.review import review_classification as _review_classification
 from cashbook_mcp.analysis.search import get_transactions as _get_transactions
 from cashbook_mcp.analysis.search import search_transactions as _search_transactions
+from cashbook_mcp.analysis.summarize import GroupBy
 from cashbook_mcp.analysis.summarize import cash_flow as _cash_flow
 from cashbook_mcp.analysis.summarize import list_categories as _list_categories
 from cashbook_mcp.analysis.summarize import (
@@ -218,12 +219,12 @@ def create_mcp(
         return await respond(lambda: {"accounts": listing.list_accounts(db, alias)})
 
     @mcp.tool(annotations=READ_ONLY, description=(
-        "Search transactions, newest first, as compact rows (use get_transactions for full rows). Filters: "
+        "Search transactions, newest first, as compact rows (id, date, amount, alias, description, kind, flow; category, merchant_name, counterpart_name, non-BRL currency and text_suspicious only when set). Use get_transactions for full rows. Filters: "
         "date range, aliases, account_ids, text (description, merchant or counterpart), categories, kinds, "
-        "min/max absolute amount, direction ('in' or 'out'). Rows carry role and flow. Internal transfers and "
+        "min/max absolute amount, direction ('in' or 'out'). Internal transfers and "
         "card bill payments are excluded unless exclude_internal=false. Without scope, all connections are "
-        "searched; scope narrows to personal, business or consolidated. Pages of `limit` rows (default 100, max 500); pass "
-        "next_cursor back as cursor for the next page." + DATES_NOTE + UNTRUSTED_NOTE
+        "searched; scope narrows to personal, business or consolidated. Pages of `limit` rows (default 50, max 200; a larger limit is clamped and the response carries limit_clamped); "
+        "pass next_cursor back as cursor for the next page." + DATES_NOTE + UNTRUSTED_NOTE
     ))  # fmt: skip
     async def search_transactions(
         date_from: date | None = None,
@@ -238,7 +239,7 @@ def create_mcp(
         direction: Literal["in", "out"] | None = None,
         exclude_internal: bool = True,
         scope: Scope | None = None,
-        limit: int = 100,
+        limit: int = 50,
         cursor: str | None = None,
     ) -> dict:
         f = TxFilters(
@@ -247,9 +248,7 @@ def create_mcp(
         )  # fmt: skip
 
         def work() -> dict:
-            page = _search_transactions(db, f, limit=limit, cursor=cursor)
-            page["rows"] = [_compact(r) for r in page["rows"]]
-            return page
+            return _search_transactions(db, f, limit=limit, cursor=cursor)
 
         return await respond(work)
 
@@ -311,11 +310,14 @@ def create_mcp(
         "currencies. Category \"uncategorized\" matches rows with no category. In spending mode refunds are "
         "netted into their own group, so a group made only of refunds has a negative total. "
         "direction=\"out\" gives net spending (refunds netted); direction=\"in\" gives income only "
-        "(personal scope includes money from the business); pass kinds=[...] for raw signed sums."
+        "(personal scope includes money from the business); pass kinds=[...] for raw signed sums. "
+        "`limit` (default 25, 1 to 200) keeps the largest groups by absolute total and merges the rest into "
+        "one \"others\" group (total, count, groups merged) so the total stays exact; month and week "
+        "groupings are never limited."
         + SCOPE_NOTE + DATES_NOTE + UNTRUSTED_NOTE
     ))  # fmt: skip
     async def summarize_transactions(
-        group_by: str | list[str],
+        group_by: GroupBy | list[GroupBy],
         compare_previous: bool = False,
         date_from: date | None = None,
         date_to: date | None = None,
@@ -329,13 +331,16 @@ def create_mcp(
         direction: Literal["in", "out"] | None = None,
         exclude_internal: bool = True,
         scope: Scope = "personal",
+        limit: int = 25,
     ) -> dict:
         f = TxFilters(
             date_from, date_to, aliases, account_ids, categories, kinds, text,
             _decimal(min_amount), _decimal(max_amount), direction, exclude_internal,
         )  # fmt: skip
         return await respond(
-            lambda: _summarize_transactions(db, f, group_by, compare_previous, today=today(), scope=scope)
+            lambda: _summarize_transactions(
+                db, f, group_by, compare_previous, today=today(), scope=scope, limit=limit
+            )
         )
 
     @mcp.tool(annotations=READ_ONLY, description=(
@@ -537,17 +542,6 @@ def create_mcp(
         return JSONResponse({"ok": True, "loaded": loaded})
 
     return mcp
-
-
-_COMPACT = ("id", "date", "alias", "account_id", "amount", "currency", "kind", "role", "flow")
-
-
-def _compact(row: dict) -> dict:
-    out = {k: row[k] for k in _COMPACT}
-    out["category"] = row["pluggy_category"]
-    out["description"] = row["description"]
-    out["suspicious"] = row["text_suspicious"]
-    return out
 
 
 def _report_scheduler_exit(task: asyncio.Task) -> None:

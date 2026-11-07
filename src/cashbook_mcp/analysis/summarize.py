@@ -24,6 +24,8 @@ _GROUP_EXPR: dict[str, str] = {
 _PERIOD_EXPR = {"month": _GROUP_EXPR["month"], "week": _GROUP_EXPR["week"]}
 _ZERO = Decimal("0.00")
 _CENT = Decimal("0.01")
+DEFAULT_GROUP_LIMIT = 25
+MAX_GROUP_LIMIT = 200
 
 
 def _average(total: Decimal, count: int) -> Decimal:
@@ -117,7 +119,12 @@ def summarize_transactions(
     *,
     today: date,
     scope: Scope = "personal",
+    limit: int = DEFAULT_GROUP_LIMIT,
 ) -> dict:
+    """Grouped totals. Non-time groupings keep the `limit` largest groups by absolute total and
+    merge the rest into one "others" group, so the totals still add up; time groupings are not limited."""
+    if not 1 <= limit <= MAX_GROUP_LIMIT:
+        raise ValueError(f"limit must be between 1 and {MAX_GROUP_LIMIT}")
     dims = [group_by] if isinstance(group_by, str) else list(group_by)
     if not 1 <= len(dims) <= 2:
         raise ValueError("group_by takes one or two dimensions")
@@ -166,6 +173,9 @@ def summarize_transactions(
         return key
 
     has_period = any(d in _PERIOD_EXPR for d in dims)
+    merged: list[tuple[tuple, dict]] = []
+    if not has_period and len(ordered) > limit:
+        ordered, merged = ordered[:limit], ordered[limit:]
     groups = []
     for keys, g in ordered:
         out = {k: jsonable(v) for k, v in g.items()}
@@ -182,10 +192,30 @@ def summarize_transactions(
                 block["previous_key"] = pkeys[0] if len(dims) == 1 else list(pkeys)
             out["previous"] = block
         groups.append(out)
+    if merged:
+        groups.append(_others(merged, previous, compare_previous, _signed(f)))
     result = {"groups": groups, "period": period, "scope": scope}
     if foreign:
         result["excluded_foreign"] = foreign
     return result
+
+
+def _others(
+    merged: list[tuple[tuple, dict]], previous: dict[tuple, dict], compare: bool, signed: bool
+) -> dict:
+    """One group standing for the merged ones: totals, counts and previous figures summed."""
+    total = sum((g["total"] for _, g in merged), _ZERO)
+    count = sum(g["count"] for _, g in merged)
+    out = {"key": "others", "total": jsonable(total), "count": count, "groups": len(merged)}
+    if signed:
+        out["in"] = jsonable(sum((g["in"] for _, g in merged), _ZERO))
+        out["out"] = jsonable(sum((g["out"] for _, g in merged), _ZERO))
+    if compare:
+        found = [previous[k] for k, _ in merged if k in previous]
+        p_total = sum((p["total"] for p in found), _ZERO)
+        p_count = sum(p["count"] for p in found)
+        out["previous"] = {"total": jsonable(p_total), "count": p_count}
+    return out
 
 
 def cash_flow(

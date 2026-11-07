@@ -211,12 +211,10 @@ async def test_every_tool_answers_with_connection_context(server):
 async def test_search_and_get_shapes(server):
     page = await call(server, "search_transactions", {"direction": "out", "limit": 2})
     assert [r["id"] for r in page["rows"]] == ["t-evil", "t-shop"]
-    assert set(page["rows"][0]) == {
-        "id", "date", "alias", "account_id", "amount", "currency", "kind", "category",
-        "description", "suspicious", "role", "flow",
-    }  # fmt: skip
-    assert (page["rows"][0]["role"], page["rows"][0]["flow"]) == ("personal", "spending")
-    assert page["rows"][0]["suspicious"] is True
+    assert {"id", "date", "amount", "alias", "description", "kind", "flow"} <= set(page["rows"][0])
+    assert not {"account_id", "role", "original_amount", "kind_reason"} & set(page["rows"][0])
+    assert page["rows"][0]["flow"] == "spending"
+    assert page["rows"][0]["text_suspicious"] is True
     assert page["suspicious_values"] == 1
     nxt = await call(server, "search_transactions", {"direction": "out", "limit": 2, "cursor": page["next_cursor"]})
     assert nxt["rows"][0]["id"] == "t-sub-15"

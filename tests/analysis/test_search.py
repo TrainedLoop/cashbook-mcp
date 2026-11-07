@@ -1,3 +1,4 @@
+import json
 from datetime import date
 from decimal import Decimal
 
@@ -24,7 +25,7 @@ def test_search_keyset_survives_reload(db, add_row):
     assert "t-new" not in seen
 
 
-def test_limit_capped_at_500(db):
+def test_search_limit_default_and_clamp(db):
     with db.write() as cur:
         cur.execute(
             "INSERT INTO transactions (id, alias, account_id, date, amount, currency, "
@@ -32,8 +33,12 @@ def test_limit_capped_at_500(db):
             "SELECT 'bulk-' || i, 'main', 'acc-main', DATE '2026-02-01', -1, 'BRL', 'x', "
             "TIMESTAMP '2026-01-01', TIMESTAMP '2026-01-01' FROM range(600) t(i)"
         )
-    page = search_transactions(db, TxFilters(), limit=10_000)
-    assert len(page["rows"]) == 500
+    default = search_transactions(db, TxFilters())
+    assert len(default["rows"]) == 50
+    assert "limit_clamped" not in default
+    page = search_transactions(db, TxFilters(), limit=500)
+    assert len(page["rows"]) == 200
+    assert page["limit_clamped"] is True
     assert page["next_cursor"] is not None
 
 
@@ -41,8 +46,9 @@ def test_rows_are_json_safe(db):
     row = search_transactions(db, TxFilters(text="github"))["rows"][0]
     assert row["amount"] == "-52.30"
     assert row["date"] == "2026-03-12"
-    assert row["original_amount"] == "-10.00"
-    assert row["suspicion_reasons"] == []
+    full = get_transactions(db, [row["id"]])[0]
+    assert full["original_amount"] == "-10.00"
+    assert full["suspicion_reasons"] == []
 
 
 def test_filters(db):
@@ -107,9 +113,35 @@ def test_rows_carry_role_and_flow_and_scope_filters(db, add_row):
         cur.execute("UPDATE connections SET role = 'business' WHERE alias = 'second'")
     add_row("b-out", "second", "acc-second", date(2026, 3, 6), "-120.00", "Tool", "purchase")
     biz = search_transactions(db, TxFilters(scope="business"))["rows"]
-    assert [(r["id"], r["role"], r["flow"]) for r in biz] == [("b-out", "business", "spending")]
-    personal = search_transactions(db, TxFilters(scope="personal"))["rows"]
-    assert personal and {r["role"] for r in personal} == {"personal"}
+    assert [(r["id"], r["flow"]) for r in biz] == [("b-out", "spending")]
+    assert "b-out" not in {r["id"] for r in search_transactions(db, TxFilters(scope="personal"))["rows"]}
     both = search_transactions(db, TxFilters(scope="consolidated"))["rows"]
-    assert {r["role"] for r in both} == {"personal", "business"}
-    assert get_transactions(db, ["b-out"])[0]["flow"] == "spending"
+    assert "b-out" in {r["id"] for r in both}
+    full = get_transactions(db, ["b-out"])[0]
+    assert (full["role"], full["flow"]) == ("business", "spending")
+
+
+ALWAYS = {"id", "date", "amount", "alias", "description", "kind", "flow"}
+
+
+def test_compact_rows_keys(db, add_row):
+    add_row("k-plain", "main", "acc-main", date(2026, 3, 20), "-5.00", "Plain", "purchase")
+    add_row(
+        "k-full", "main", "acc-main", date(2026, 3, 21), "-9.00", "Full", "purchase",
+        category="Food", merchant="Shop", counterpart="Someone", currency="USD",
+    )  # fmt: skip
+    with db.write() as cur:
+        cur.execute("UPDATE transactions SET text_suspicious = true WHERE id = 'k-full'")
+    rows = {r["id"]: r for r in search_transactions(db, TxFilters())["rows"]}
+    assert set(rows["k-plain"]) == ALWAYS
+    assert set(rows["k-full"]) == ALWAYS | {
+        "category", "merchant_name", "counterpart_name", "currency", "text_suspicious",
+    }
+    assert rows["k-full"]["text_suspicious"] is True
+
+
+def test_compact_row_is_small(db, add_row):
+    add_row("0123456789abcdef0123456789abcdef0123", "main", "acc-main", date(2026, 3, 22),
+            "-120.50", "Supermarket purchase", "purchase", category="Groceries")  # fmt: skip
+    rows = search_transactions(db, TxFilters(text="Supermarket purchase"))["rows"]
+    assert len(json.dumps(rows[0])) < 300

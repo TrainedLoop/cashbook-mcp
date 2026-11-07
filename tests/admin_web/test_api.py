@@ -1,4 +1,5 @@
 import logging
+from importlib.metadata import version
 
 import pytest
 from admin_support import OWNER, PUBLIC, wait_until
@@ -392,7 +393,7 @@ def test_server_info(env):
     assert got["next_full_refresh"] == "2026-11-07T06:00:00-03:00"
     assert got["schema_version"] == env.ctx.db.schema_version()
     assert got["db_size_bytes"] == env.ctx.db.size_bytes() > 0
-    assert got["app_version"] == "0.1.0"
+    assert got["app_version"] == version("cashbook-mcp")
     for secret in ("psecret", "gsecret", "ab" * 32, "s" * 64):
         assert secret not in resp.text
 

@@ -412,9 +412,18 @@ class Syncer:
         txs = _from_rows(cur, Transaction, "SELECT {cols} FROM transactions WHERE removed_at IS NULL")
         accounts = _from_rows(cur, Account, "SELECT {cols} FROM accounts WHERE removed_at IS NULL")
         bills = _from_rows(cur, Bill, "SELECT {cols} FROM bills WHERE removed_at IS NULL")
+        purposes = dict(cur.execute("SELECT account_id, purpose FROM account_settings").fetchall())
+        overrides = {
+            tid: (kind, change_id)
+            for tid, kind, change_id in cur.execute(
+                "SELECT o.transaction_id, o.kind, o.change_id FROM classification_overrides o "
+                "JOIN transactions t ON t.id = o.transaction_id WHERE t.removed_at IS NULL"
+            ).fetchall()
+        }
+        classified = classify(txs, accounts, bills, purposes=purposes, overrides=overrides)
         changed = [
             [new.kind, new.kind_reason, new.id]
-            for old, new in zip(txs, classify(txs, accounts, bills), strict=True)
+            for old, new in zip(txs, classified, strict=True)
             if (old.kind, old.kind_reason) != (new.kind, new.kind_reason)
         ]
         if changed:

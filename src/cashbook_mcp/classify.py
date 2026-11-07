@@ -6,11 +6,12 @@ classified apart (one bank names the owner, the other names nobody).
 """
 
 import re
+from collections.abc import Mapping
 from dataclasses import replace
 from datetime import timedelta
 from decimal import Decimal
 
-from cashbook_mcp.models import Account, Bill, Kind, Transaction
+from cashbook_mcp.models import Account, Bill, Kind, Purpose, Transaction
 
 # Keys are lowercase Pluggy category descriptions (English). Matching is
 # case-insensitive on the exact string.
@@ -29,6 +30,8 @@ CATEGORY_KINDS: dict[str, Kind] = {
     "credit card payment": "card_bill_payment",
     "automatic investment": "investment",
     "income taxes": "fee",
+    # Yields stay income even on investment accounts.
+    "proceeds interests and dividends": "income",
     "tax on financial operations": "fee",
     "same person transfer": "internal_transfer",
     # Money held and later released inside the same account.
@@ -55,12 +58,27 @@ def _category_kind(category: str | None) -> Kind | None:
 
 
 def classify(
-    transactions: list[Transaction], accounts: list[Account], bills: list[Bill]
+    transactions: list[Transaction],
+    accounts: list[Account],
+    bills: list[Bill],
+    *,
+    purposes: Mapping[str, Purpose] | None = None,
+    overrides: Mapping[str, tuple[Kind, str]] | None = None,
 ) -> list[Transaction]:
+    """Per-transaction rules, then manual overrides (transaction id -> (kind,
+    change id)), then own-transfer pairing. purposes maps account id to its purpose."""
     by_id = {a.id: a for a in accounts}
     tax_ids = {d for a in accounts if (d := _digits(a.owner_tax_id))}
     numbers = {a.number: a.alias for a in accounts if a.number is not None}
-    classified = [_classify_one(t, by_id, tax_ids, numbers, bills) for t in transactions]
+    investment = {a for a, p in (purposes or {}).items() if p == "investment"}
+    classified = [
+        _classify_one(t, by_id, tax_ids, numbers, bills, investment) for t in transactions
+    ]
+    if overrides:
+        classified = [
+            replace(t, kind=o[0], kind_reason=f"manual:{o[1]}") if (o := overrides.get(t.id)) else t
+            for t in classified
+        ]
     return _pair_own_transfers(classified, by_id)
 
 
@@ -69,10 +87,15 @@ def _is_transfer_category(category: str | None) -> bool:
     return c.startswith(("transfer", "same person transfer"))
 
 
+def _guessed(t: Transaction) -> bool:
+    """A fallback kind that pairing may replace; manual kinds never are."""
+    return t.kind in _GUESSED_KINDS and not (t.kind_reason or "").startswith("manual:")
+
+
 def _pair_kind(out: Transaction, inn: Transaction, by_id: dict[str, Account]) -> Kind | None:
     """The kind both sides of a candidate pair take, or None if they must not pair."""
     out_type, in_type = by_id[out.account_id].type, by_id[inn.account_id].type
-    if out.kind not in _GUESSED_KINDS and inn.kind not in _GUESSED_KINDS:
+    if not _guessed(out) and not _guessed(inn):
         return None  # nothing to fix
     if out_type == "BANK" and in_type == "CREDIT":
         return "card_bill_payment"  # an exact credit on the card is the payment
@@ -116,7 +139,7 @@ def _pair_own_transfers(
             continue
         taken.update((oid, iid))
         for side, other in ((o, iid), (i, oid)):
-            if side.kind in _GUESSED_KINDS:
+            if _guessed(side):
                 rewritten[side.id] = replace(side, kind=kind, kind_reason=f"paired_with:{other}")
     return [rewritten.get(t.id, t) for t in transactions]
 
@@ -127,6 +150,7 @@ def _classify_one(
     tax_ids: set[str],
     numbers: dict[str, str],
     bills: list[Bill],
+    investment: set[str],
 ) -> Transaction:
     account = by_id.get(t.account_id)
     kind = _category_kind(t.pluggy_category)
@@ -173,6 +197,9 @@ def _classify_one(
 
     if kind is not None:
         return replace(t, kind=kind, kind_reason=f"pluggy_category:{t.pluggy_category}")
+
+    if t.account_id in investment:
+        return replace(t, kind="investment", kind_reason="investment_account")
 
     if t.amount > 0:
         return replace(t, kind="income", kind_reason="sign")

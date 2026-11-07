@@ -584,7 +584,6 @@ async def test_set_purpose_upserts_and_deletes_regular(syncer, fake, db):
         syncer.set_purpose("item-a-bank", "investment")
 
 
-@pytest.mark.xfail(strict=True, reason="Task 3")
 async def test_set_purpose_reclassifies(syncer, fake, db):
     fake.add_item("item-a")
     fake.add_tx("item-a-bank", "tx-1", "2026-10-01", amount=-40.0)

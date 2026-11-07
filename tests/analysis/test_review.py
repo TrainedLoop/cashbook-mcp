@@ -120,3 +120,15 @@ def test_prompt_names_tools():
     named = set(prompts.TOOL_CALL.findall(text))
     assert {"review_classification", "reclassify_transactions"} <= named
     assert prompts.SAFETY in text
+
+
+def test_hint_counts_an_override_once(db, add_row):
+    _row(db, add_row, "both", "-10.00", "internal_transfer", "manual:c1", tax="11122233344", acct="777")
+    _row(db, add_row, "tax", "-10.00", "internal_transfer", "manual:c1", tax="111.222.333-44")
+    _row(db, add_row, "acct", "-10.00", "internal_transfer", "manual:c1", acct="777")
+    for i in ("both", "tax", "acct"):
+        _override(db, i, "internal_transfer")
+    _row(db, add_row, "new", "-80.00", "purchase", "sign", category="Transfers", counterpart="Ana",
+         tax="11122233344", acct="777")
+    (g,) = _groups(db)
+    assert g["hint"] == {"kinds": {"internal_transfer": 3}}

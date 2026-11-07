@@ -44,19 +44,19 @@ def _group_key(row: dict) -> tuple[str, str]:
     return "tx", row["id"]
 
 
-def _override_kinds(cur) -> tuple[dict[str, Counter], dict[str, Counter]]:
-    """Kinds of live overrides, counted per counterpart tax id digits and per account number."""
-    by_tax: dict[str, Counter] = {}
-    by_acct: dict[str, Counter] = {}
+def _override_kinds(cur) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str]]]:
+    """Kinds of live overrides ({transaction id: kind}) per counterpart tax id digits and per account number."""
+    by_tax: dict[str, dict[str, str]] = {}
+    by_acct: dict[str, dict[str, str]] = {}
     cur.execute(
-        "SELECT o.kind, t.counterpart_tax_id, t.counterpart_account_number "
+        "SELECT o.transaction_id, o.kind, t.counterpart_tax_id, t.counterpart_account_number "
         "FROM classification_overrides o JOIN v_transactions t ON t.id = o.transaction_id"
     )
-    for kind, tax, acct in cur.fetchall():
+    for tx_id, kind, tax, acct in cur.fetchall():
         if d := _digits(tax):
-            by_tax.setdefault(d, Counter())[kind] += 1
+            by_tax.setdefault(d, {})[tx_id] = kind
         if a := (acct or "").strip():
-            by_acct.setdefault(a, Counter())[kind] += 1
+            by_acct.setdefault(a, {})[tx_id] = kind
     return by_tax, by_acct
 
 
@@ -102,11 +102,12 @@ def review_classification(
     groups = []
     for (reason, (_, _key)), members in buckets.items():
         first = members[0]
-        counts: Counter = Counter()
+        matched: dict[str, str] = {}  # union by override, so one matching both keys counts once
         if tax := _digits(first["counterpart_tax_id"]):
-            counts += by_tax.get(tax, Counter())
+            matched |= by_tax.get(tax, {})
         if acct := (first["counterpart_account_number"] or "").strip():
-            counts += by_acct.get(acct, Counter())
+            matched |= by_acct.get(acct, {})
+        counts = Counter(matched.values())
         named = next((m for m in members if m["counterpart_name"]), first)
         groups.append({
             "reason": reason,

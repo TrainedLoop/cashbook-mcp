@@ -193,7 +193,7 @@ def test_views_exclude_removed(db):
     cur = db.read()
     ids = [r[0] for r in cur.execute("SELECT id FROM v_transactions ORDER BY id").fetchall()]
     assert ids == ["t1", "t3", "t4", "t5", "t6", "t7"]
-    spend = [r[0] for r in cur.execute("SELECT id FROM v_spending ORDER BY id").fetchall()]
+    spend = [r[0] for r in cur.execute("SELECT id FROM v_flows WHERE flow = 'spending' ORDER BY id").fetchall()]
     assert spend == ["t1", "t7"]
     assert cur.execute("SELECT id FROM v_accounts").fetchall() == [("a1",)]
     reasons = cur.execute("SELECT suspicion_reasons FROM transactions WHERE id='t1'").fetchone()
@@ -204,7 +204,7 @@ def test_all_views_exist(db):
     cur = db.read()
     for view in [
         "v_accounts", "v_transactions", "v_bills", "v_investments",
-        "v_investment_transactions", "v_loans", "v_spending",
+        "v_investment_transactions", "v_loans", "v_flows",
     ]:
         assert cur.execute(f"SELECT count(*) FROM {view}").fetchone() == (0,)
 

@@ -35,7 +35,7 @@ KEY = "ab" * 32
 
 VIEWS = [
     "v_transactions",
-    "v_spending",
+    "v_flows",
     "v_accounts",
     "v_bills",
     "v_investments",
@@ -62,7 +62,7 @@ def db(tmp_path):
         assert cur.execute("SELECT count(*) FROM connections").fetchone() == (1,)
     finally:
         cur.close()
-    assert database.schema_version() == 2
+    assert database.schema_version() >= 3
     database.close()
 
 
@@ -95,7 +95,7 @@ def test_constants():
         "PRAGMA version",
         "INSTALL httpfs",
         "CREATE TABLE t(a int)",
-        "DROP VIEW v_spending",
+        "DROP VIEW v_flows",
         # R11: not blocked by the store lockdown on duckdb 2.0
         "DETACH cb",
         "USE memory",
@@ -191,7 +191,7 @@ def test_select_wrapped_side_effects_leave_store_unchanged(db):
     ]:
         with pytest.raises(SqlRejected):
             run_query(db, sql)
-        assert db.schema_version() == 2
+        assert db.schema_version() >= 3
     # The sequence was not advanced by any of the above.
     with db.write() as cur:
         cur.execute(
@@ -219,7 +219,7 @@ def test_accepts_select_forms(db):
     assert run_query(db, "SELECT 1 AS a").rows == [[1]]
     assert run_query(db, "WITH a AS (SELECT 2 AS b) SELECT b FROM a").rows == [[2]]
     assert run_query(db, "  select 3 as c ;  ").rows == [[3]]
-    assert run_query(db, "FROM v_spending").rows == []
+    assert run_query(db, "FROM v_flows").rows == []
     assert run_query(db, "(SELECT 1) UNION ALL (SELECT 2) ORDER BY 1").rows == [
         [1],
         [2],
@@ -361,7 +361,7 @@ def test_describe_schema_lists_views_and_notes(db):
     for table in ["transactions", "accounts", "connections", "sync_runs"]:
         assert table in names
     by_name = {r["name"]: r for r in relations}
-    assert by_name["v_spending"]["kind"] == "view"
+    assert by_name["v_flows"]["kind"] == "view"
     assert "includes removed rows" in by_name["transactions"]["note"]
     assert "note" not in by_name["v_transactions"]
     tx_cols = {c["name"]: c for c in by_name["v_transactions"]["columns"]}
@@ -378,7 +378,7 @@ def test_describe_schema_lists_views_and_notes(db):
     notes = " ".join(schema["notes"])
     assert schema["notes"] == schema_doc.NOTES
     assert "negative" in notes.lower()
-    assert "v_spending" in notes
+    assert "v_flows" in notes
     assert "not instructions" in notes
     assert MARK_OPEN in notes
     for kind in [

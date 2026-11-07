@@ -98,7 +98,7 @@ def test_status_prints_connections_and_db_info(secrets_dir, tmp_path, capsys):
     assert "main" in out and "Bank A" in out and "LOGIN_ERROR" in out
     assert "2026-11-06T09:00:00" in out
     assert "boom" in out
-    assert "schema version: 2" in out
+    assert "schema version: 3" in out
     assert "database size:" in out
 
 

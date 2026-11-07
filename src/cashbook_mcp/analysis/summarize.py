@@ -33,6 +33,14 @@ def _and(where: str, clause: str) -> str:
     return f"{where} AND {clause}" if where else f"WHERE {clause}"
 
 
+# Temporary stand-in for the dropped v_spending until the aggregations move to
+# v_flows spend_amount: BRL and foreign outflows, no internal movements.
+_SPENDING = (
+    "(SELECT * FROM v_flows WHERE amount < 0 AND flow IN ('spending', 'foreign') "
+    "AND kind NOT IN ('internal_transfer', 'card_bill_payment', 'investment'))"
+)
+
+
 def _count_foreign(cur, base: str, where: str, params: list) -> int:
     sql = f"SELECT count(*) FROM {base} {_and(where, 'currency != ?')}"
     return cur.execute(sql, [*params, BASE_CURRENCY]).fetchone()[0]
@@ -47,7 +55,7 @@ def _aggregate(db: Database, f: TxFilters, group_by: str) -> tuple[dict[str, dic
     """Groups for f, and how many matching rows were skipped as foreign currency."""
     # Spending semantics (outflows only, internal movements and investments
     # excluded) unless the caller asks for inflows or specific kinds.
-    base = "v_transactions" if (f.direction == "in" or f.kinds) else "v_spending"
+    base = "v_transactions" if (f.direction == "in" or f.kinds) else _SPENDING
     where, params = where_clause(f)
     if base == "v_transactions" and "investment" not in (f.kinds or []):
         # Same exclusion as cash_flow, so income figures agree.
@@ -231,7 +239,7 @@ def list_categories(
     where, params = where_clause(TxFilters(date_from=date_from, date_to=date_to))
     sql = (
         f"SELECT {_GROUP_EXPR['category']} AS k, count(*), abs(sum(amount)) "
-        f"FROM v_spending {_and(where, 'currency = ?')} GROUP BY 1 ORDER BY 3 DESC, 1"
+        f"FROM {_SPENDING} {_and(where, 'currency = ?')} GROUP BY 1 ORDER BY 3 DESC, 1"
     )
     cur = db.read()
     try:

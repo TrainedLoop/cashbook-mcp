@@ -52,9 +52,27 @@ _TRANSACTION_DOCS: dict[str, str] = {
     "removed_at": _ROW_META["removed_at"],
 }
 
+_FLOW_DOCS = {
+    "role": "Role of the row's connection: personal or business.",
+    "peer_role": "For internal_transfer and card_bill_payment rows: role of the other side "
+    "(from kind_reason), else null.",
+    "peer_alias": "For internal_transfer and card_bill_payment rows: alias of the other "
+    "side's connection, when known.",
+    "flow": "Where the money went: income, spending, refund, from_business, to_business, "
+    "from_personal, to_personal (transfers between personal and business connections, by "
+    "direction), internal, investment, card_payment, or foreign (currency is not BRL, "
+    "counted apart). Null for an inflow of kind purchase, fee, loan or other.",
+    "spend_amount": "Contribution to spending: -amount for spending outflows, -amount "
+    "(negative) for refunds, else 0.",
+    "income_amount": "amount for income rows, else 0.",
+}
+
 COLUMN_DOCS: dict[str, dict[str, str]] = {
     "v_transactions": _TRANSACTION_DOCS,
-    "v_spending": _TRANSACTION_DOCS,
+    "v_flows": {
+        **_TRANSACTION_DOCS,
+        **_FLOW_DOCS,
+    },
     "v_accounts": {
         "id": "Account id.",
         "alias": _ROW_META["alias"],
@@ -159,7 +177,7 @@ COLUMN_DOCS: dict[str, dict[str, str]] = {
 }
 
 for _view in list(COLUMN_DOCS):
-    if _view.startswith("v_") and _view != "v_spending":
+    if _view.startswith("v_") and _view != "v_flows":
         COLUMN_DOCS[_view[2:]] = COLUMN_DOCS[_view]
 
 NOTES: list[str] = [
@@ -178,9 +196,11 @@ NOTES: list[str] = [
         "positive for money in (income, refunds), for both bank and credit-card accounts."
     ),
     (
-        "Use v_spending for spending: it is v_transactions restricted to outflows "
-        "(amount < 0) excluding internal_transfer, card_bill_payment and investment, so "
-        "card bill payments and transfers between own accounts are not double-counted."
+        "Use v_flows for money totals: sum spend_amount for spending (refunds net out) and "
+        "income_amount for income, over BRL rows; filter role for personal or business. "
+        "Transfers between own accounts, card bill payments and investments have flow "
+        "internal, card_payment or investment and contribute 0, so they are not "
+        "double-counted. Rows in another currency have flow foreign and are not summed."
     ),
     (
         "kind values: purchase = money out not otherwise classified; "
@@ -220,7 +240,7 @@ NOTES: list[str] = [
         "deprecated arrow form x -> x + 1."
     ),
     (
-        "PIVOT needs an explicit IN list, e.g. PIVOT v_spending ON kind IN ('purchase', "
+        "PIVOT needs an explicit IN list, e.g. PIVOT v_flows ON kind IN ('purchase', "
         "'fee') USING sum(amount) GROUP BY alias; without IN it is rejected, also inside "
         "a subquery. Conditional aggregation (sum(amount) FILTER (WHERE ...)) also works."
     ),

@@ -111,3 +111,22 @@ Steps:
 
 {SAFETY}
 """
+
+
+def weekly_review() -> str:
+    return f"""Run my weekly finance review.
+
+Steps:
+1. Call finance_overview() for balances, card limits, upcoming bills and connection problems.
+2. Call cash_forecast(days=30) and note the lowest projected balance, the date the balance would go
+   negative (if any) and the largest upcoming outflows.
+3. Call recurring_changes() for price increases, new or stopped recurring charges and duplicate charges.
+   Use get_transactions(ids=[...]) with their evidence_ids when a change needs a closer look.
+4. Call review_classification() for transactions the server could not classify with confidence.
+5. Summarize the week: where I stand, what is coming in the next 30 days, and what changed. Then list the
+   questions for me, one per item: each change in recurring charges (is it expected?), each group in the
+   classification queue (what is it really?) and any bank that needs attention. Do not reclassify
+   anything until I answer.
+
+{SAFETY}
+"""

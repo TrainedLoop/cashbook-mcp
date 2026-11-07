@@ -9,7 +9,7 @@ from cashbook_mcp.store.db import Database
 
 from .filters import jsonable
 from .metrics import Scope, scope_clause, totals
-from .recurring import find_recurring
+from .recurring import find_recurring, is_stopped
 
 _ZERO = Decimal("0.00")
 _CONFIDENT = ("high", "medium")
@@ -228,7 +228,7 @@ def _build_events(db: Database, today: date, end: date, banks: list[dict], cards
             cadence = item["cadence_days"]
             when = date.fromisoformat(item["next_expected"])
             if when < today:
-                if (today - when).days * 2 > cadence:
+                if is_stopped(when, cadence, today):
                     continue  # past due by more than half a cadence: stopped
                 dates = [today]  # a little late: expect it today
                 when += timedelta(days=cadence)

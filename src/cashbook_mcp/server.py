@@ -28,6 +28,7 @@ from cashbook_mcp.analysis.metrics import Scope
 from cashbook_mcp.analysis.networth import net_worth as _net_worth
 from cashbook_mcp.analysis.overview import finance_overview as _finance_overview
 from cashbook_mcp.analysis.recurring import find_recurring as _find_recurring
+from cashbook_mcp.analysis.recurring import recurring_changes as _recurring_changes
 from cashbook_mcp.analysis.review import review_classification as _review_classification
 from cashbook_mcp.analysis.search import get_transactions as _get_transactions
 from cashbook_mcp.analysis.search import search_transactions as _search_transactions
@@ -53,7 +54,7 @@ log = logging.getLogger("cashbook-mcp")
 ALL_TOOL_NAMES = frozenset({
     "finance_overview", "list_connections", "list_accounts", "search_transactions", "get_transactions",
     "list_bills", "list_investments", "get_investment_transactions", "list_loans", "list_categories",
-    "summarize_transactions", "cash_flow", "net_worth", "find_recurring", "describe_schema", "query_sql",
+    "summarize_transactions", "cash_flow", "net_worth", "find_recurring", "recurring_changes", "describe_schema", "query_sql",
     "reclassify_transactions", "undo_reclassification", "list_reclassifications", "review_classification",
     "cash_forecast",
 })  # fmt: skip
@@ -389,6 +390,16 @@ def create_mcp(
         )
 
     @mcp.tool(annotations=READ_ONLY, description=(
+        "Changes in recurring charges and incomes over the last `months` months: price_increase (latest "
+        "charge more than 5% and 1.00 above its usual amount), new (a regular series that started in the "
+        "last 60 days), stopped (a series past due by more than half a cadence) and duplicate (same "
+        "name and amount twice within 3 days). Each change carries evidence_ids. Candidates only: decide "
+        "from the evidence." + SCOPE_NOTE + UNTRUSTED_NOTE
+    ))  # fmt: skip
+    async def recurring_changes(scope: Scope = "personal", months: int = 6) -> dict:
+        return await respond(lambda: _recurring_changes(db, today(), scope=scope, months=months))
+
+    @mcp.tool(annotations=READ_ONLY, description=(
         "Projected balance of the scope's bank accounts for the next `days` (1 to 90) from known commitments: "
         "open card bills, remaining installments and high or medium confidence recurring charges and income, "
         "each event with its confidence. It adds no new card spending beyond recurring charges and leaves out "
@@ -509,6 +520,10 @@ def create_mcp(
     @mcp.prompt(name="upcoming_bills", description="Bills and expected charges due in the next `days` days.")
     def upcoming_bills(days: int = 15) -> str:
         return prompts.upcoming_bills(days, today=today())
+
+    mcp.prompt(name="weekly_review", description=(
+        "Weekly check-in: overview, 30-day cash forecast, recurring changes and the classification queue."
+    ))(prompts.weekly_review)  # fmt: skip
 
     mcp.prompt(name="review_classifications", description=(
         "Review the classification queue with the owner, group by group, and reclassify what they confirm."

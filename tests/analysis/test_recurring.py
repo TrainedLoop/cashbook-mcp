@@ -228,3 +228,10 @@ def test_flagged_key_keeps_untrusted_marking(db, today, add_row):
         cur.execute("UPDATE transactions SET text_suspicious = true WHERE id LIKE 'sus-%'")
     (change,) = _changes(db, today, "duplicate")
     assert change["key"] == wrap_suspicious(name.lower())
+
+
+def test_one_off_rows_ignored(db, today, add_row):
+    for n, d in enumerate([date(2026, 1, 10), date(2026, 2, 10), date(2026, 3, 10)]):
+        add_row(f"t-oo-{n}", "main", "acc-main", d, "-700.00", "Condo works", "one_off")
+    assert not any("condo" in i["key"] for i in find_recurring(db, today))
+    assert not any("condo" in i["key"] for i in recurring_changes(db, today)["changes"])

@@ -177,3 +177,19 @@ def test_overlong_ids_are_unknown_and_echo_is_bounded(db):
     assert e.value.code == "unknown_ids"
     assert all(len(i) <= 64 for i in e.value.details["unknown_ids"])
     assert state(db, "t-1")[0] == "purchase"
+
+
+def test_reclassify_to_one_off_moves_outflow_out_of_spending_and_undo_restores(db):
+    def flow(tid):
+        cur = db.read()
+        try:
+            return cur.execute("SELECT flow, spend_amount FROM v_flows WHERE id = ?", [tid]).fetchone()
+        finally:
+            cur.close()
+
+    assert flow("t-1") == ("spending", Decimal("10.00"))
+    out = run(db, ["t-1"], kind="one_off")
+    assert out["changes"] == [{"id": "t-1", "old_kind": "purchase", "new_kind": "one_off"}]
+    assert flow("t-1") == ("one_off", Decimal("0.00"))
+    undo(db, out["change_id"], now=NOW)
+    assert flow("t-1") == ("spending", Decimal("10.00"))

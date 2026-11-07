@@ -515,6 +515,13 @@ async def test_reclassify_schema_lists_kinds(server):
     assert set(next(o for o in schema["anyOf"] if "enum" in o)["enum"]) == set(KINDS)
 
 
+async def test_reclassify_description_states_kind_effects(server):
+    async with Client(server) as c:
+        tool = next(t for t in await c.list_tools() if t.name == "reclassify_transactions")
+    assert "outflows: purchase, fee, loan, other" in tool.description
+    assert "inflows" in tool.description and "one_off_out" in tool.description
+
+
 async def test_summarize_schema_exposes_group_by_values(server):
     async with Client(server) as c:
         tool = next(t for t in await c.list_tools() if t.name == "summarize_transactions")

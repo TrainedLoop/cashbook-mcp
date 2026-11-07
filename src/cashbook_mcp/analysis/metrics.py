@@ -24,7 +24,7 @@ APART_KEYS = {
 }
 _ZERO = Decimal("0.00")
 # Foreign rows are counted apart, except movements that never were spending or income.
-_NOT_COUNTED_FOREIGN = ("internal_transfer", "card_bill_payment", "investment")
+_NOT_COUNTED_FOREIGN = ("internal_transfer", "card_bill_payment", "investment", "one_off")
 
 
 def scope_clause(scope: Scope) -> tuple[str, list]:
@@ -52,6 +52,9 @@ def metric_exprs(scope: Scope) -> dict[str, str]:
         "refunds": "sum(CASE WHEN flow = 'refund' THEN -spend_amount ELSE 0 END)",
         "spending": "sum(spend_amount)",
     }
+    # Manual one_off rows: real money kept out of spending and income, reported apart.
+    exprs["one_off_out"] = "sum(CASE WHEN flow = 'one_off' AND amount < 0 THEN -amount ELSE 0 END)"
+    exprs["one_off_in"] = "sum(CASE WHEN flow = 'one_off' AND amount > 0 THEN amount ELSE 0 END)"
     for flow in APART_FLOWS[scope]:
         exprs[APART_KEYS[flow]] = f"sum(CASE WHEN flow = '{flow}' THEN abs(amount) ELSE 0 END)"
     return exprs
@@ -60,7 +63,7 @@ def metric_exprs(scope: Scope) -> dict[str, str]:
 def metric_flows(scope: Scope) -> tuple[str, ...]:
     """Flows that contribute to the scope's metrics (others only add empty periods)."""
     scope_clause(scope)  # validates
-    return ("income", "spending", "refund", *APART_FLOWS[scope])
+    return ("income", "spending", "refund", "one_off", *APART_FLOWS[scope])
 
 
 def count_foreign(

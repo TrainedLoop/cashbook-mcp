@@ -88,7 +88,9 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
         cur.close()
     month_start = today.replace(day=1)
     flow = cash_flow(db, month_start, today)
-    month_to_date = dict(flow["totals"])
+    month_to_date = {
+        k: v for k, v in flow["totals"].items() if k not in ("one_off_out", "one_off_in") or Decimal(v)
+    }
     if "excluded_foreign" in flow:
         month_to_date["excluded_foreign"] = flow["excluded_foreign"]
     overview = {
@@ -108,5 +110,8 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
     }
     if has_business:
         business = totals(db, month_start, today, "business")
-        overview["business"] = {k: jsonable(business[k]) for k in ("income", "spending", "owner_draws")}
+        keys = ("income", "spending", "owner_draws", "one_off_out", "one_off_in")
+        overview["business"] = {
+            k: jsonable(business[k]) for k in keys if k not in ("one_off_out", "one_off_in") or business[k]
+        }
     return overview

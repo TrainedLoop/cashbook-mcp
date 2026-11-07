@@ -39,4 +39,4 @@ def test_transaction_defaults_and_immutability():
 
 def test_kinds_order():
     assert KINDS[0] == "purchase"
-    assert len(KINDS) == 9
+    assert len(KINDS) == 10

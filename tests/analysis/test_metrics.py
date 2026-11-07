@@ -86,20 +86,20 @@ def test_scope_totals(scoped):
         "income": Decimal("200.00"), "refunds": Decimal("0.00"),
         "spending": Decimal("80.00"), "net": Decimal("120.00"),
         "from_business": Decimal("200.00"), "to_business": Decimal("90.00"),
-        "excluded_foreign": 0,
+        "one_off_out": Decimal("0.00"), "one_off_in": Decimal("0.00"), "excluded_foreign": 0,
     }
     business = totals(scoped, *MARCH, "business")
     assert business == {
         "income": Decimal("1000.00"), "refunds": Decimal("0.00"),
         "spending": Decimal("150.00"), "net": Decimal("850.00"),
         "owner_draws": Decimal("200.00"), "owner_contributions": Decimal("90.00"),
-        "excluded_foreign": 0,
+        "one_off_out": Decimal("0.00"), "one_off_in": Decimal("0.00"), "excluded_foreign": 0,
     }
     cons = totals(scoped, *MARCH, "consolidated")
     assert cons == {
         "income": Decimal("1000.00"), "refunds": Decimal("0.00"),
         "spending": Decimal("230.00"), "net": Decimal("770.00"),
-        "excluded_foreign": 0,
+        "one_off_out": Decimal("0.00"), "one_off_in": Decimal("0.00"), "excluded_foreign": 0,
     }
 
 
@@ -210,3 +210,27 @@ def test_excluded_foreign_counts_only_the_requested_side(db):
         db, TxFilters(date_from=MARCH[0], date_to=MARCH[1]), "kind", today=TODAY
     )
     assert out["excluded_foreign"] == 1
+    foreign("fo", "-500.00", "one_off")  # not skipped spending
+    out = summarize_transactions(
+        db, TxFilters(date_from=MARCH[0], date_to=MARCH[1]), "kind", today=TODAY
+    )
+    assert out["excluded_foreign"] == 1
+    assert totals(db, *MARCH)["excluded_foreign"] == 2  # fp and fi, not fo
+
+
+def test_one_off_is_reported_apart_and_categories_still_add_up(db):
+    add(db, "tx-spend", "pa", "-80.00", "purchase", category="Groceries")
+    add(db, "tx-pay", "pa", "-900.00", "one_off", category="Housing", reason="manual:1")
+    add(db, "tx-back", "pa", "100.00", "one_off", category="Housing", reason="manual:1")
+    add(db, "tx-biz", "ba", "-50.00", "one_off", reason="manual:1")
+    res = cash_flow(db, *MARCH, today=TODAY)
+    assert res["totals"]["spending"] == "80.00"
+    assert res["totals"]["income"] == "0.00"
+    assert (res["totals"]["one_off_out"], res["totals"]["one_off_in"]) == ("900.00", "100.00")
+    assert res["periods"][0]["one_off_out"] == "900.00"
+    assert sum(Decimal(c["total"]) for c in list_categories(db, *MARCH)) == Decimal("80.00")
+    t = totals(db, *MARCH)
+    assert (t["spending"], t["one_off_out"], t["one_off_in"]) == (
+        Decimal("80.00"), Decimal("900.00"), Decimal("100.00"))
+    assert totals(db, *MARCH, "business")["one_off_out"] == Decimal("50.00")
+    assert totals(db, *MARCH, "consolidated")["one_off_out"] == Decimal("950.00")

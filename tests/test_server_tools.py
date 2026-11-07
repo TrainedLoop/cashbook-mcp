@@ -108,7 +108,7 @@ async def test_tools_read_only_annotations(server):
     async with Client(server) as c:
         tools = await c.list_tools()
     assert {t.name for t in tools} == ALL_TOOL_NAMES
-    assert len(ALL_TOOL_NAMES) == 20
+    assert len(ALL_TOOL_NAMES) == 21
     writers = {"reclassify_transactions", "undo_reclassification"}
     for t in tools:
         assert t.annotations is not None, t.name
@@ -186,6 +186,7 @@ async def test_every_tool_answers_with_connection_context(server):
         ("cash_flow", {"date_from": "2026-01-01", "date_to": "2026-03-31"}),
         ("net_worth", {}),
         ("find_recurring", {"months": 6}),
+        ("cash_forecast", {"days": 45, "by_account": True}),
         ("describe_schema", {}),
         ("query_sql", {"sql": "SELECT count(*) AS n FROM v_transactions"}),
         ("list_reclassifications", {}),

@@ -79,3 +79,12 @@ def test_suspicious_group_key_keeps_marker(db, today, add_row):
     assert out["suspicious_values"] >= 1
     clean = next(i for i in items if i["key"] == "netflix")
     assert not has_marker(clean["key"])
+
+
+def test_items_carry_account(db, today, add_row):
+    (item,) = _by_key(find_recurring(db, today), "netflix")
+    assert (item["account_id"], item["account_type"]) == ("card-main", "CREDIT")
+    for n, d in enumerate([date(2026, 1, 9), date(2026, 2, 9), date(2026, 3, 9)]):
+        add_row(f"t-gym-{n}", "main", "card-main" if n < 2 else "acc-main", d, "-90.00", "GYM", "purchase", merchant="Gym")
+    (gym,) = _by_key(find_recurring(db, today), "gym")
+    assert (gym["account_id"], gym["account_type"]) == ("acc-main", "BANK")  # most recent evidence row

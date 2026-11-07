@@ -70,3 +70,11 @@ def test_business_block_only_with_a_business_connection(db, add_row, today):
     assert block["owner_draws"] == "0.00"
     # personal figures stay out of the business block and the business out of the personal one
     assert finance_overview(db, today)["month_to_date"]["spending"] == "408.20"
+
+
+def test_overview_has_forecast_block(db, today):
+    from cashbook_mcp.analysis.overview import finance_overview
+
+    block = finance_overview(db, today)["forecast"]
+    assert set(block) == {"lowest", "negative_on"}
+    assert set(block["lowest"]) == {"date", "balance"}

@@ -23,6 +23,7 @@ from cashbook_mcp.admin_web.api import AdminContext, admin_routes
 from cashbook_mcp.admin_web.identity import GoogleIdentity
 from cashbook_mcp.analysis import listing
 from cashbook_mcp.analysis.filters import TxFilters, today_in
+from cashbook_mcp.analysis.forecast import cash_forecast as _cash_forecast
 from cashbook_mcp.analysis.metrics import Scope
 from cashbook_mcp.analysis.networth import net_worth as _net_worth
 from cashbook_mcp.analysis.overview import finance_overview as _finance_overview
@@ -54,6 +55,7 @@ ALL_TOOL_NAMES = frozenset({
     "list_bills", "list_investments", "get_investment_transactions", "list_loans", "list_categories",
     "summarize_transactions", "cash_flow", "net_worth", "find_recurring", "describe_schema", "query_sql",
     "reclassify_transactions", "undo_reclassification", "list_reclassifications", "review_classification",
+    "cash_forecast",
 })  # fmt: skip
 
 READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
@@ -195,7 +197,8 @@ def create_mcp(
         "days_ahead; month-to-date income, spending and net; top spending categories this month; and "
         "connections with problems and how to fix them. Adds a `business` block (month-to-date income, "
         "spending and owner_draws) when a business connection exists; the rest is personal. `net_worth` gives the current net and change_this_month, summed only over "
-        "the change_components (bank, investment, card) with real, non-estimated values on both days; loans never count."
+        "the change_components (bank, investment, card) with real, non-estimated values on both days; loans never count. "
+        "`forecast` gives the lowest projected balance and first negative date over the next 30 days (see cash_forecast)."
     ))  # fmt: skip
     async def finance_overview(days_ahead: int = 10) -> dict:
         return await respond(lambda: _finance_overview(db, today(), days_ahead))
@@ -384,6 +387,17 @@ def create_mcp(
         return await respond(
             lambda: {"candidates": _find_recurring(db, today(), months, min_occurrences)}
         )
+
+    @mcp.tool(annotations=READ_ONLY, description=(
+        "Projected balance of the scope's bank accounts for the next `days` (1 to 90) from known commitments: "
+        "open card bills, remaining installments and high or medium confidence recurring charges and income, "
+        "each event with its confidence. It adds no new card spending beyond recurring charges and leaves out "
+        "company withdrawals and irregular inflows (see typical_monthly_inflow). Returns start_balance, events "
+        "(negative is money out), balance per day (per week above 31 days), lowest, negative_on, notes; "
+        "by_account adds the same per bank account." + SCOPE_NOTE
+    ))  # fmt: skip
+    async def cash_forecast(scope: Scope = "personal", days: int = 30, by_account: bool = False) -> dict:
+        return await respond(lambda: _cash_forecast(db, today(), scope=scope, days=days, by_account=by_account))
 
     # -- SQL --------------------------------------------------------------
 

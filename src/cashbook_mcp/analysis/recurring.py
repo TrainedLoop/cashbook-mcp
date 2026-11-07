@@ -59,7 +59,8 @@ def find_recurring(
     marks = ", ".join("?" * len(INTERNAL_KINDS))
     sql = (
         "SELECT id, date, amount, coalesce(merchant_name, counterpart_name, description), "
-        "text_suspicious "
+        "text_suspicious, account_id, "
+        "(SELECT a.type FROM v_accounts a WHERE a.id = v_transactions.account_id) "
         f"FROM v_transactions WHERE date > ? AND date <= ? AND kind NOT IN ({marks}) "
         "AND amount != 0 ORDER BY date, id"
     )
@@ -73,11 +74,11 @@ def find_recurring(
     # Normalizing strips the untrusted markers, so remember which groups had a
     # flagged row and wrap their key again below.
     flagged: set[tuple[str, str]] = set()
-    for id, d, amount, name, suspicious in fetched:
+    for id, d, amount, name, suspicious, account_id, account_type in fetched:
         key = _normalize_key(name or "")
         if key:
             group = (key, "in" if amount > 0 else "out")
-            groups.setdefault(group, []).append((id, d, amount))
+            groups.setdefault(group, []).append((id, d, amount, account_id, account_type))
             if suspicious:
                 flagged.add(group)
 
@@ -106,6 +107,9 @@ def find_recurring(
                 "next_expected": (last + timedelta(days=cadence)).isoformat(),
                 "confidence": _confidence(cadence, regularity, spread),
                 "evidence_ids": [r[0] for r in picked],
+                # The most recent evidence row decides when a candidate spans accounts.
+                "account_id": picked[-1][3],
+                "account_type": picked[-1][4],
             }
         )
     items.sort(key=lambda i: (_RANK[i["confidence"]], -Decimal(i["typical_amount"]), i["key"]))

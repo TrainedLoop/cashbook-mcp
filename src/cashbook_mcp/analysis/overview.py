@@ -6,6 +6,7 @@ from decimal import Decimal
 from cashbook_mcp.store.db import Database
 
 from .filters import jsonable
+from .forecast import cash_forecast
 from .metrics import totals
 from .networth import net_worth
 from .summarize import cash_flow, list_categories
@@ -96,6 +97,8 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
         "connections_with_problems": problems,
     }
     overview["net_worth"] = _net_worth_block(db, today)
+    projection = cash_forecast(db, today, scope="personal", days=30)
+    overview["forecast"] = {"lowest": projection["lowest"], "negative_on": projection["negative_on"]}
     if has_business:
         business = totals(db, month_start, today, "business")
         overview["business"] = {k: jsonable(business[k]) for k in ("income", "spending", "owner_draws")}

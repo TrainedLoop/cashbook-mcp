@@ -625,3 +625,25 @@ async def test_set_purpose_reclassifies(syncer, fake, db):
     syncer.set_purpose("item-a-bank", "investment")
 
     assert rows(db, "SELECT kind, kind_reason FROM transactions WHERE id = 'tx-1'") != before
+
+
+async def test_next_auto_sync_at_is_stored_and_kept_current(syncer, fake):
+    fake.add_item("item-a")
+    fake.items["item-a"]["nextAutoSyncAt"] = "2026-11-06T09:00:00.000Z"
+
+    conn = await syncer.add_connection("a", "item-a")
+    assert conn.next_auto_sync_at == datetime(2026, 11, 6, 9, 0)
+
+    # check_updates refreshes it even when nothing needs reloading
+    fake.items["item-a"]["nextAutoSyncAt"] = "2026-11-06T10:30:00.000Z"
+    assert await syncer.check_updates() == []
+    assert syncer.connections()[0].next_auto_sync_at == datetime(2026, 11, 6, 10, 30)
+
+    # and a load writes it too
+    fake.items["item-a"]["nextAutoSyncAt"] = "2026-11-07T10:30:00.000Z"
+    await syncer.load("a")
+    assert syncer.connections()[0].next_auto_sync_at == datetime(2026, 11, 7, 10, 30)
+
+    fake.items["item-a"].pop("nextAutoSyncAt")
+    await syncer.load("a")
+    assert syncer.connections()[0].next_auto_sync_at is None

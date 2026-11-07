@@ -1,5 +1,6 @@
 import dataclasses
 import shutil
+from datetime import datetime
 
 import duckdb
 import pytest
@@ -49,6 +50,8 @@ def test_columns_follow_models(tmp_path):
             expected = {f.name for f in dataclasses.fields(model)}
             if table != "connections":
                 expected |= {"first_seen_at", "last_seen_at", "removed_at"}
+            if table == "transactions":
+                expected |= {"changed_at"}
             assert set(cols) == expected, table
         tx = columns(db, "transactions")
         assert tx["amount"] == "DECIMAL(18,2)"
@@ -111,16 +114,17 @@ def test_migration_backup_and_failure(tmp_path):
     shutil.copy(MIGRATIONS_DIR / "0003_flows.sql", bad_dir)
     shutil.copy(MIGRATIONS_DIR / "0004_category_overrides.sql", bad_dir)
     shutil.copy(MIGRATIONS_DIR / "0005_one_off.sql", bad_dir)
-    (bad_dir / "0006_bad.sql").write_text(
+    shutil.copy(MIGRATIONS_DIR / "0006_changes_payment_method.sql", bad_dir)
+    (bad_dir / "0007_bad.sql").write_text(
         "CREATE TABLE half_done (x INTEGER);\nALTER TABLE connections DROP COLUMN nope;\n"
     )
 
     with pytest.raises(MigrationError) as exc:
         Database.open(path, KEY, migrations_dir=bad_dir)
-    assert "0006_bad.sql" in str(exc.value)
+    assert "0007_bad.sql" in str(exc.value)
     assert KEY not in str(exc.value)
 
-    assert (tmp_path / "c.duckdb.bak-5").exists()
+    assert (tmp_path / "c.duckdb.bak-6").exists()
 
     db = Database.open(path, KEY)
     try:
@@ -134,7 +138,7 @@ def test_migration_backup_and_failure(tmp_path):
     finally:
         db.close()
 
-    backup = Database.open(tmp_path / "c.duckdb.bak-5", KEY)
+    backup = Database.open(tmp_path / "c.duckdb.bak-6", KEY)
     try:
         assert backup.read().execute("SELECT alias FROM connections").fetchall() == [("main",)]
     finally:
@@ -151,15 +155,16 @@ def test_successful_later_migration(tmp_path):
     shutil.copy(MIGRATIONS_DIR / "0003_flows.sql", mdir)
     shutil.copy(MIGRATIONS_DIR / "0004_category_overrides.sql", mdir)
     shutil.copy(MIGRATIONS_DIR / "0005_one_off.sql", mdir)
-    (mdir / "0006_add.sql").write_text("CREATE TABLE extra (x INTEGER);")
+    shutil.copy(MIGRATIONS_DIR / "0006_changes_payment_method.sql", mdir)
+    (mdir / "0007_add.sql").write_text("CREATE TABLE extra (x INTEGER);")
     (mdir / "notes.txt").write_text("ignored")
     db = Database.open(path, KEY, migrations_dir=mdir)
     try:
-        assert db.schema_version() == 6
+        assert db.schema_version() == 7
         assert db.read().execute("SELECT count(*) FROM extra").fetchone() == (0,)
     finally:
         db.close()
-    assert (tmp_path / "c.duckdb.bak-5").exists()
+    assert (tmp_path / "c.duckdb.bak-6").exists()
 
 
 def test_migrations_ship_in_package():
@@ -295,5 +300,51 @@ def test_v5_keeps_overrides_journal_and_adds_one_off_flow(tmp_path):
         assert cur.execute(
             "SELECT pluggy_category, flow FROM v_flows WHERE id = 't1'"
         ).fetchone() == ("Housing", "spending")
+    finally:
+        db.close()
+
+
+def test_v6_backfills_changed_at_and_keeps_overrides(tmp_path):
+    path = tmp_path / "c.duckdb"
+    v5 = tmp_path / "v5"
+    v5.mkdir()
+    for f in sorted(MIGRATIONS_DIR.glob("000[1-5]_*.sql")):
+        shutil.copy(f, v5)
+    db = Database.open(path, KEY, migrations_dir=v5)
+    assert db.schema_version() == 5
+    with db.write() as cur:
+        cur.execute(
+            "INSERT INTO connections (alias, item_id, connector_name, created_at) "
+            "VALUES ('main', 'item-1', 'Bank', now())"
+        )
+        cur.execute(
+            "INSERT INTO accounts (id, alias, item_id, type, subtype, name, balance, currency, "
+            "first_seen_at, last_seen_at) "
+            "VALUES ('a1', 'main', 'item-1', 'BANK', 'X', 'Acc', 0, 'BRL', now(), now())"
+        )
+        for tid, seen in (("t1", "2026-01-02 10:00:00"), ("t2", "2026-02-03 11:00:00")):
+            cur.execute(
+                "INSERT INTO transactions (id, alias, account_id, date, amount, currency, description, "
+                "kind, kind_reason, pluggy_category, first_seen_at, last_seen_at) "
+                "VALUES (?, 'main', 'a1', '2026-01-02', -5, 'BRL', 'x', 'purchase', 'sign', 'Shopping', ?, now())",
+                [tid, seen],
+            )
+        cur.execute("INSERT INTO category_overrides VALUES ('t1', 'main', 'Housing', 'c1')")
+        cur.execute("INSERT INTO classification_overrides VALUES ('t2', 'main', 'one_off', 'c2')")
+    db.close()
+
+    db = Database.open(path, KEY)
+    try:
+        assert db.schema_version() >= 6
+        cur = db.read()
+        assert cur.execute(
+            "SELECT id, changed_at = first_seen_at, payment_method FROM transactions ORDER BY id"
+        ).fetchall() == [("t1", True, None), ("t2", True, None)]
+        assert cur.execute("SELECT category FROM category_overrides").fetchall() == [("Housing",)]
+        assert cur.execute("SELECT kind FROM classification_overrides").fetchall() == [("one_off",)]
+        assert cur.execute(
+            "SELECT pluggy_category, payment_method, changed_at FROM v_flows WHERE id = 't1'"
+        ).fetchone() == ("Housing", None, datetime(2026, 1, 2, 10, 0))
+        assert cur.execute("SELECT next_auto_sync_at FROM connections").fetchone() == (None,)
     finally:
         db.close()

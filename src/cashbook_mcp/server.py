@@ -203,14 +203,20 @@ def create_mcp(
         "spending and owner_draws) when a business connection exists. `net_worth` (personal) gives the current net and change_this_month, summed only over "
         "the change_components (bank, investment, card) with real, non-estimated values on both days; loans never count. "
         "`forecast` gives the lowest projected personal balance, the first negative date over the next 30 days and "
-        "low_confidence_events, how many projected events have low confidence (see cash_forecast)."
+        "low_confidence_events, how many projected events have low confidence (see cash_forecast). "
+        "`data_freshness` gives `last_updated` (the oldest bank refresh) and `next_update_expected` (the earliest "
+        "next one): banks are refreshed by the data provider about once a day, so transactions made after "
+        "`last_updated` appear only after `next_update_expected`; the server checks hourly and reloads when "
+        "new data is available."
     ))  # fmt: skip
     async def finance_overview(days_ahead: int = 10) -> dict:
         return await respond(lambda: _finance_overview(db, today(), days_ahead))
 
     @mcp.tool(annotations=READ_ONLY, description=(
         "Connected banks: alias, bank, role (personal or business), status, last sync, consent expiry, accounts (each with purpose: regular or investment), stored history range and "
-        "row count, and a remediation hint when something needs fixing."
+        "row count, and a remediation hint when something needs fixing. Banks are refreshed by the data provider "
+        "about once a day: `last_updated_at` is the latest refresh and `next_update_expected` the next one, "
+        "so transactions made after `last_updated_at` appear only after it; the server checks hourly."
     ))  # fmt: skip
     async def list_connections() -> dict:
         return await respond(lambda: {"connections": listing.list_connections(db)})

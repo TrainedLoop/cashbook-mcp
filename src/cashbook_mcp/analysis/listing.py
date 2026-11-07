@@ -78,6 +78,7 @@ def list_connections(db: Database) -> list[dict]:
                 "execution_status": c.execution_status,
                 "error_code": c.error_code,
                 "last_updated_at": iso_utc(c.last_updated_at),
+                "next_update_expected": iso_utc(c.next_auto_sync_at),
                 "last_synced_at": iso_utc(c.last_synced_at),
                 "last_sync_error": c.last_sync_error,
                 "consent_expires_at": iso_utc(c.consent_expires_at),

@@ -159,6 +159,7 @@ def _status_fields(item: dict) -> dict[str, Any]:
         "error_code": error.get("code"),
         "error_message": prepare_text(error.get("message")),
         "consent_expires_at": _parse_ts(item.get("consentExpiresAt")),
+        "next_auto_sync_at": _parse_ts(item.get("nextAutoSyncAt")),
     }
 
 
@@ -339,7 +340,7 @@ class Syncer:
         status = _status_fields(snap.item)
         cur.execute(
             "UPDATE connections SET status = ?, execution_status = ?, error_code = ?, "
-            "error_message = ?, consent_expires_at = ?, last_updated_at = ?, "
+            "error_message = ?, consent_expires_at = ?, next_auto_sync_at = ?, last_updated_at = ?, "
             "last_synced_at = ?, last_sync_error = NULL WHERE alias = ?",
             [*status.values(), _parse_ts(snap.item.get("lastUpdatedAt")), now, snap.alias],
         )
@@ -464,7 +465,8 @@ class Syncer:
             with self._db.write() as cur:
                 cur.execute(
                     "UPDATE connections SET status = ?, execution_status = ?, error_code = ?, "
-                    "error_message = ?, consent_expires_at = ? WHERE alias = ? AND item_id = ?",
+                    "error_message = ?, consent_expires_at = ?, next_auto_sync_at = ? "
+                    "WHERE alias = ? AND item_id = ?",
                     [*_status_fields(item).values(), conn.alias, conn.item_id],
                 )
             updated = _parse_ts(item.get("lastUpdatedAt"))
@@ -520,8 +522,8 @@ class Syncer:
             status = _status_fields(item)
             cur.execute(
                 "INSERT INTO connections (alias, item_id, connector_name, created_at, status, "
-                "execution_status, error_code, error_message, consent_expires_at, role) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "execution_status, error_code, error_message, consent_expires_at, next_auto_sync_at, "
+                "role) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     alias,
                     item_id,

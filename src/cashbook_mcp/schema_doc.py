@@ -48,8 +48,14 @@ _TRANSACTION_DOCS: dict[str, str] = {
     "text_suspicious": "True if a text column of this row was flagged as a possible "
     "prompt injection (its value is wrapped in the suspicious marker).",
     "suspicion_reasons": "List of reasons the text was flagged; empty when not flagged.",
+    "payment_method": "How the payment was made, as the data source reports it, upper-case: "
+    "PIX, TED, BOLETO, OTHER, ...; null when unknown. A BOLETO payment carries the beneficiary's "
+    "CNPJ/name in counterpart_tax_id and counterpart_name; the barcode is not provided.",
     "first_seen_at": _ROW_META["first_seen_at"],
     "last_seen_at": _ROW_META["last_seen_at"],
+    "changed_at": "UTC timestamp of the last change to the row: first sync, a content change, "
+    "removal, or a reclassification (kind or category). Unlike last_seen_at it does not move on a "
+    "sync that finds the row unchanged. list_changes reads it.",
     "removed_at": _ROW_META["removed_at"],
 }
 
@@ -170,6 +176,8 @@ COLUMN_DOCS: dict[str, dict[str, str]] = {
         "error_message": "Provider error message of the last refresh, if any."
         + _UNTRUSTED,
         "last_updated_at": "UTC timestamp of the last provider refresh.",
+        "next_auto_sync_at": "UTC timestamp of the provider's next scheduled refresh "
+        "(about 24 hours after last_updated_at), if known.",
         "consent_expires_at": "UTC timestamp when the bank consent expires.",
         "last_synced_at": "UTC timestamp of the last successful sync into this store.",
         "last_sync_error": "Error of the last failed sync, if any.",

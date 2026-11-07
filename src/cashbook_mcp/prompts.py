@@ -136,7 +136,10 @@ Steps:
 3. Call recurring_changes() for price increases, new or stopped recurring charges and duplicate charges.
    Use get_transactions(ids=[...]) with their evidence_ids when a change needs a closer look.
 4. Call review_classification() for transactions the server could not classify with confidence.
-5. Summarize the week: where I stand, what is coming in the next 30 days, and what changed. Then list the
+5. Note data_freshness from finance_overview (last_updated, next_update_expected) before drawing
+   conclusions about the most recent days: banks refresh about once a day, so newer activity may
+   not be loaded yet.
+6. Summarize the week: where I stand, what is coming in the next 30 days, and what changed. Then list the
    questions for me, one per item: each change in recurring charges (is it expected?), each group in the
    classification queue (what is it really?) and any bank that needs attention. Do not reclassify
    anything until I answer.

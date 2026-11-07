@@ -101,6 +101,7 @@ def _transaction(alias: str, account: Account, t: dict) -> Transaction:
         installment_number=card_meta.get("installmentNumber"),
         installment_total=card_meta.get("totalInstallments"),
         purchase_date=_date(card_meta.get("purchaseDate")),
+        payment_method=(str(payment.get("paymentMethod") or "").strip().upper() or None),
     )
 
 

@@ -52,6 +52,7 @@ class Connection:
     last_synced_at: datetime | None
     last_sync_error: str | None
     role: Role = "personal"
+    next_auto_sync_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,6 +95,7 @@ class Transaction:
     kind_reason: str = ""
     text_suspicious: bool = False
     suspicion_reasons: tuple[str, ...] = ()
+    payment_method: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

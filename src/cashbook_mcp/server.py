@@ -196,11 +196,13 @@ def create_mcp(
 
     @mcp.tool(annotations=READ_ONLY, description=(
         "Start here. Balances per bank account; limit, used limit and open bill per card; bills due within "
-        "days_ahead; month-to-date income, spending and net; top spending categories this month; and "
+        "days_ahead (accounts, cards and bills of every connection, each with its role: personal or business); "
+        "personal month-to-date income, spending and net; top personal spending categories this month; and "
         "connections with problems and how to fix them. Adds a `business` block (month-to-date income, "
-        "spending and owner_draws) when a business connection exists; the rest is personal. `net_worth` gives the current net and change_this_month, summed only over "
+        "spending and owner_draws) when a business connection exists. `net_worth` (personal) gives the current net and change_this_month, summed only over "
         "the change_components (bank, investment, card) with real, non-estimated values on both days; loans never count. "
-        "`forecast` gives the lowest projected balance and first negative date over the next 30 days (see cash_forecast)."
+        "`forecast` gives the lowest projected personal balance, the first negative date over the next 30 days and "
+        "low_confidence_events, how many projected events have low confidence (see cash_forecast)."
     ))  # fmt: skip
     async def finance_overview(days_ahead: int = 10) -> dict:
         return await respond(lambda: _finance_overview(db, today(), days_ahead))

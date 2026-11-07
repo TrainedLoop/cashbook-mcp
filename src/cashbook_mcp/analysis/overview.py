@@ -11,6 +11,9 @@ from .metrics import totals
 from .networth import net_worth
 from .summarize import cash_flow, list_categories
 
+# Whose money each listed row is: the role of its connection.
+_ROLE = "(SELECT c.role FROM connections c WHERE c.alias = a.alias) AS role"
+
 
 def _dicts(cur, sql: str, params: list | None = None) -> list[dict]:
     result = cur.execute(sql, params or [])
@@ -59,18 +62,18 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
     try:
         accounts = _dicts(
             cur,
-            "SELECT id, alias, name, subtype, balance, currency FROM v_accounts "
+            f"SELECT id, alias, {_ROLE}, name, subtype, balance, currency FROM v_accounts a "
             "WHERE type = 'BANK' ORDER BY alias, name",
         )
         cards = _dicts(
             cur,
-            "SELECT id, alias, name, balance, credit_limit, available_credit, currency "
-            "FROM v_accounts WHERE type = 'CREDIT' ORDER BY alias, name",
+            f"SELECT id, alias, {_ROLE}, name, balance, credit_limit, available_credit, currency "
+            "FROM v_accounts a WHERE type = 'CREDIT' ORDER BY alias, name",
         )
         bills_due = _dicts(
             cur,
-            "SELECT id, alias, account_id, due_date, closing_date, total_amount, "
-            "minimum_payment, currency FROM v_bills "
+            f"SELECT id, alias, {_ROLE}, account_id, due_date, closing_date, total_amount, "
+            "minimum_payment, currency FROM v_bills a "
             "WHERE due_date BETWEEN ? AND ? ORDER BY due_date, id",
             [today, today + timedelta(days=days_ahead)],
         )
@@ -98,7 +101,11 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
     }
     overview["net_worth"] = _net_worth_block(db, today)
     projection = cash_forecast(db, today, scope="personal", days=30)
-    overview["forecast"] = {"lowest": projection["lowest"], "negative_on": projection["negative_on"]}
+    overview["forecast"] = {
+        "lowest": projection["lowest"],
+        "negative_on": projection["negative_on"],
+        "low_confidence_events": sum(e["confidence"] == "low" for e in projection["events"]),
+    }
     if has_business:
         business = totals(db, month_start, today, "business")
         overview["business"] = {k: jsonable(business[k]) for k in ("income", "spending", "owner_draws")}

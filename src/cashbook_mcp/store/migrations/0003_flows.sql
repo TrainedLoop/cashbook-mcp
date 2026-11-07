@@ -8,7 +8,7 @@ WITH conn_accounts AS (
            regexp_replace(a.owner_tax_id, '[^0-9]', '', 'g') AS tax_digits
     FROM v_accounts a
     JOIN connections c ON c.alias = a.alias
-    WHERE a.owner_tax_id IS NOT NULL
+    WHERE a.owner_tax_id IS NOT NULL AND a.type = 'BANK'
 ),
 -- One connection per tax id; when it exists on both roles, a CNPJ (14 digits)
 -- prefers business and a CPF (11 digits) prefers personal.
@@ -37,6 +37,18 @@ base AS (
                     WHERE p.id = substr(t.kind_reason, length('paired_with:') + 1))
                WHEN t.kind_reason LIKE 'counterpart_is_own_account:%' THEN
                    substr(t.kind_reason, length('counterpart_is_own_account:') + 1)
+               -- Bank side: the card account the bill belongs to. Card side: the
+               -- bank account that paid it (lowest id when several matched).
+               WHEN t.kind_reason LIKE 'matched_card_bill:%' THEN
+                   CASE WHEN (SELECT a.type FROM v_accounts a WHERE a.id = t.account_id) = 'BANK'
+                   THEN (SELECT ca.alias FROM v_bills b
+                         JOIN v_accounts ca ON ca.id = b.account_id
+                         WHERE b.id = substr(t.kind_reason, length('matched_card_bill:') + 1))
+                   ELSE (SELECT bt.alias FROM v_transactions bt
+                         JOIN v_accounts ba ON ba.id = bt.account_id AND ba.type = 'BANK'
+                         WHERE bt.kind_reason = t.kind_reason
+                         ORDER BY bt.id LIMIT 1)
+                   END
                WHEN t.kind_reason = 'counterpart_is_owner_tax_id' THEN
                    (SELECT tp.alias FROM tax_peer tp
                     WHERE tp.tax_digits = regexp_replace(t.counterpart_tax_id, '[^0-9]', '', 'g'))

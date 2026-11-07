@@ -136,23 +136,55 @@ def test_peer_role_by_reason(db):
     assert got["m1"] == (None, None)
 
 
-def test_tax_id_matching_both_roles_prefers_by_length(db):
-    # The same digits on a personal and a business connection: an 11-digit id
-    # is a CPF (personal), a 14-digit id a CNPJ (business).
+@pytest.mark.parametrize(
+    ("digits", "tax", "role"),
+    [
+        ("12345678000195", "12.345.678/0001-95", "business"),
+        ("99999999999", "999.999.999-99", "personal"),
+    ],
+)
+def test_tax_id_matching_both_roles_prefers_by_length(db, digits, tax, role):
+    # The same digits on a personal and a business bank account: a CNPJ
+    # (14 digits) prefers business, a CPF (11 digits) personal.
     with db.write() as cur:
-        cur.execute("UPDATE accounts SET owner_tax_id = '12345678000195' WHERE id = 'sa'")
-        cur.execute("UPDATE accounts SET owner_tax_id = '12345678000195' WHERE id = 'sb'")
-    add(db, "cnpj", "pa", "-1.00", "internal_transfer", "counterpart_is_owner_tax_id",
-        tax="12.345.678/0001-95")
+        cur.execute("UPDATE accounts SET owner_tax_id = ? WHERE id IN ('sa', 'sb')", [digits])
+    add(db, "t", "pa", "-1.00", "internal_transfer", "counterpart_is_owner_tax_id", tax=tax)
+    assert flows(db)["t"][3] == role
+
+
+def test_tax_id_ignores_card_accounts(db):
     with db.write() as cur:
-        cur.execute("UPDATE accounts SET owner_tax_id = '99999999999' WHERE id IN ('sa', 'sb')")
-    add(db, "cpf", "ba", "-1.00", "internal_transfer", "counterpart_is_owner_tax_id",
-        tax="999.999.999-99")
+        cur.execute("UPDATE accounts SET owner_tax_id = '55555555555' WHERE id = 'bc'")
+    add(db, "t", "pa", "-1.00", "internal_transfer", "counterpart_is_owner_tax_id",
+        tax="55555555555")
+    assert flows(db)["t"][3] is None
+
+
+def add_bill(db, bid, account):
+    with db.write() as cur:
+        cur.execute(
+            "INSERT INTO bills (id, alias, account_id, due_date, total_amount, currency, "
+            "first_seen_at, last_seen_at) VALUES (?, 'x', ?, DATE '2026-03-15', 1, 'BRL', "
+            "now(), now())",
+            [bid, account],
+        )
+
+
+def test_matched_card_bill_peer(db):
+    add_bill(db, "b1", "bc")
+    add_bill(db, "b2", "pc")
+    add(db, "bank1", "pa", "-90.00", "card_bill_payment", "matched_card_bill:b1")
+    add(db, "card1", "bc", "90.00", "card_bill_payment", "matched_card_bill:b1")
+    add(db, "bank2", "pa", "-20.00", "card_bill_payment", "matched_card_bill:b2")
+    add(db, "card2", "pc", "20.00", "card_bill_payment", "matched_card_bill:b2")
+    add_bill(db, "b3", "pc")
+    add(db, "card3", "pc", "5.00", "card_bill_payment", "matched_card_bill:b3")
     got = flows(db)
-    assert got["cnpj"][3] == "business"
-    assert got["cpf"][3] == "personal"
-    # CPF to personal, from a business account: owner draw
-    assert got["cpf"][0] == "to_personal"
+    assert got["bank1"] == ("to_business", D(0), D(0), "business")
+    assert got["card1"] == ("from_personal", D(0), D(0), "personal")
+    assert got["bank2"] == ("card_payment", D(0), D(0), "personal")
+    assert got["card2"] == ("card_payment", D(0), D(0), "personal")
+    assert got["card3"] == ("card_payment", D(0), D(0), None)
 
 
 def test_removed_rows_are_not_in_v_flows(db):

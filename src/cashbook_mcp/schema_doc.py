@@ -55,7 +55,8 @@ _TRANSACTION_DOCS: dict[str, str] = {
 _FLOW_DOCS = {
     "role": "Role of the row's connection: personal or business.",
     "peer_role": "For internal_transfer and card_bill_payment rows: role of the other side "
-    "(from kind_reason), else null.",
+    "(from kind_reason: paired transaction, own account, owner tax id on a bank account, or "
+    "the card bill's account), else null.",
     "peer_alias": "For internal_transfer and card_bill_payment rows: alias of the other "
     "side's connection, when known.",
     "flow": "Where the money went: income, spending, refund, from_business, to_business, "

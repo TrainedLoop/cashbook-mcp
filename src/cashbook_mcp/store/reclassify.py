@@ -9,13 +9,14 @@ import secrets
 from datetime import UTC, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from cashbook_mcp.content import clean_text
+from cashbook_mcp.content import prepare_text, suspicion_reasons, wrap_suspicious
 from cashbook_mcp.models import KINDS
 from cashbook_mcp.store.db import Database
 from cashbook_mcp.store.sync import Syncer
 
 MAX_IDS_PER_CALL = 200
 MAX_NOTE_CHARS = 200
+MAX_ID_CHARS = 64
 MAX_UNKNOWN_LISTED = 20
 MAX_LIST_LIMIT = 100
 
@@ -43,6 +44,14 @@ def _day_bounds(now: datetime, tz: ZoneInfo) -> tuple[datetime, datetime]:
     return _naive_utc(start), _naive_utc(end)
 
 
+def _prepare_note(note: str | None, tool_names: frozenset[str]) -> str | None:
+    """Agent-written text is stored and echoed later, so it gets the same treatment as bank text."""
+    text = (prepare_text(note) or "")[:MAX_NOTE_CHARS].strip()
+    if not text:
+        return None
+    return wrap_suspicious(text) if suspicion_reasons([text], tool_names) else text
+
+
 def reclassify(
     db: Database,
     ids: list[str],
@@ -52,6 +61,7 @@ def reclassify(
     now: datetime,
     tz: ZoneInfo,
     daily_cap: int,
+    tool_names: frozenset[str] = frozenset(),
 ) -> dict:
     if not ids:
         raise ReclassifyError("empty", "ids must list at least one transaction id")
@@ -62,7 +72,7 @@ def reclassify(
     if kind not in KINDS:
         raise ReclassifyError("bad_kind", f"kind must be one of: {', '.join(KINDS)}", kinds=list(KINDS))
     ids = list(dict.fromkeys(ids))
-    note = (clean_text(note).strip()[:MAX_NOTE_CHARS] or None) if note is not None else None
+    note = _prepare_note(note, tool_names)
     change_id = secrets.token_urlsafe(9)
     created = _naive_utc(now)
 
@@ -74,12 +84,12 @@ def reclassify(
                 f"SELECT id, alias, kind FROM transactions WHERE removed_at IS NULL AND id IN ({marks})", ids
             ).fetchall()
         }
-        unknown = [i for i in ids if i not in live]
+        unknown = [i for i in ids if len(i) > MAX_ID_CHARS or i not in live]
         if unknown:
             raise ReclassifyError(
                 "unknown_ids",
                 "some ids are not live transactions; nothing was changed",
-                unknown_ids=unknown[:MAX_UNKNOWN_LISTED],
+                unknown_ids=[i[:MAX_ID_CHARS] for i in unknown[:MAX_UNKNOWN_LISTED]],
                 unknown_count=len(unknown),
             )
         existing = dict(

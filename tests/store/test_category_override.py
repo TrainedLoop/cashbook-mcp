@@ -196,13 +196,13 @@ def test_kind_is_never_changed_by_category(db):
 
     run(db, ["t-1"], category="Rent")
     with db.write() as cur:
-        Syncer._reclassify(cur)
+        Syncer._reclassify(cur, NOW.replace(tzinfo=None))
     assert one(db, "SELECT kind, kind_reason FROM transactions WHERE id = 't-1'") == [("purchase", "sign")]
     # Classification reads the provider's category: a transfer-like category still decides the kind.
     with db.write() as cur:
         cur.execute("UPDATE transactions SET pluggy_category = 'Credit card payment' WHERE id = 't-2'")
         cur.execute("INSERT INTO category_overrides VALUES ('t-2', 'main', 'Rent', 'x')")
-        Syncer._reclassify(cur)
+        Syncer._reclassify(cur, NOW.replace(tzinfo=None))
     assert one(db, "SELECT kind FROM transactions WHERE id = 't-2'") == [("card_bill_payment",)]
 
 

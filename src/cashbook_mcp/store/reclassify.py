@@ -183,7 +183,11 @@ def reclassify(
                 "category = excluded.category, change_id = excluded.change_id",
                 [[i, live[i][0], category, change_id] for i in cat_todo],
             )
-        Syncer._reclassify(cur)
+        # An override written or dropped for a row is a change of that row.
+        cur.executemany(
+            "UPDATE transactions SET changed_at = ? WHERE id = ?", [[created, i] for i in todo]
+        )
+        Syncer._reclassify(cur, created)
         changes = []
         for i in todo:
             change: dict = {"id": i}
@@ -210,12 +214,19 @@ def undo(db: Database, change_id: str, *, now: datetime) -> dict:
             "UNION ALL SELECT transaction_id FROM category_overrides WHERE change_id = ?)",
             [change_id, change_id],
         ).fetchone()[0]
+        when = _naive_utc(now)
+        cur.execute(
+            "UPDATE transactions SET changed_at = ? WHERE id IN ("
+            "SELECT transaction_id FROM classification_overrides WHERE change_id = ? "
+            "UNION SELECT transaction_id FROM category_overrides WHERE change_id = ?)",
+            [when, change_id, change_id],
+        )
         cur.execute("DELETE FROM classification_overrides WHERE change_id = ?", [change_id])
         cur.execute("DELETE FROM category_overrides WHERE change_id = ?", [change_id])
         cur.execute(
-            "UPDATE classification_changes SET undone_at = ? WHERE change_id = ?", [_naive_utc(now), change_id]
+            "UPDATE classification_changes SET undone_at = ? WHERE change_id = ?", [when, change_id]
         )
-        Syncer._reclassify(cur)
+        Syncer._reclassify(cur, when)
     return {"change_id": change_id, "reverted": int(reverted)}
 
 

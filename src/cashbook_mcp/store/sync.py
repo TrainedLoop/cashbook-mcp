@@ -334,7 +334,7 @@ class Syncer:
             self._upsert(cur, table, models, now)
             removed += self._mark_removed(cur, table, snap, [m.id for m in models], now)
 
-        self._reclassify(cur)
+        self._reclassify(cur, now)
         self._write_snapshots(cur, snap)
 
         status = _status_fields(snap.item)
@@ -377,6 +377,20 @@ class Syncer:
         cols = [*names, "first_seen_at", "last_seen_at", "removed_at"]
         updates = [f"{n} = excluded.{n}" for n in names if n not in _KEEP_ON_CONFLICT]
         updates += ["last_seen_at = excluded.last_seen_at", "removed_at = NULL"]
+        tail = [now, now, None]
+        if table == "transactions":
+            # changed_at moves on insert, on a content difference, and when a removed row returns.
+            differs = " OR ".join(
+                f"{table}.{n} IS DISTINCT FROM excluded.{n}"
+                for n in names
+                if n not in _KEEP_ON_CONFLICT
+            )
+            cols.append("changed_at")
+            tail.append(now)
+            updates.append(
+                f"changed_at = CASE WHEN {table}.removed_at IS NOT NULL OR {differs} "
+                f"THEN excluded.changed_at ELSE {table}.changed_at END"
+            )
         sql = (
             f"INSERT INTO {table} ({', '.join(cols)}) "
             f"VALUES ({', '.join('?' for _ in cols)}) "
@@ -387,7 +401,7 @@ class Syncer:
             values = [getattr(m, n) for n in names]
             if isinstance(m, Transaction):
                 values[names.index("suspicion_reasons")] = list(m.suspicion_reasons)
-            params.append([*values, now, now, None])
+            params.append([*values, *tail])
         cur.executemany(sql, params)
 
     @staticmethod
@@ -398,11 +412,12 @@ class Syncer:
         ids: list[str],
         now: datetime,
     ) -> int:
+        touched = ", changed_at = ?" if table == "transactions" else ""
         sql = (
-            f"UPDATE {table} SET removed_at = ? WHERE alias = ? AND removed_at IS NULL "
+            f"UPDATE {table} SET removed_at = ?{touched} WHERE alias = ? AND removed_at IS NULL "
             "AND NOT list_contains(?::VARCHAR[], id)"
         )
-        params: list[Any] = [now, snap.alias, ids]
+        params: list[Any] = [now, *([now] if touched else []), snap.alias, ids]
         date_col = _DATE_TABLES.get(table)
         if date_col:
             sql += f" AND {date_col} BETWEEN ? AND ?"
@@ -410,7 +425,8 @@ class Syncer:
         return cur.execute(sql, params).fetchone()[0]
 
     @staticmethod
-    def _reclassify(cur: duckdb.DuckDBPyConnection) -> None:
+    def _reclassify(cur: duckdb.DuckDBPyConnection, now: datetime) -> None:
+        """Re-run classification; rows whose kind or kind_reason change get changed_at = now."""
         txs = _from_rows(cur, Transaction, "SELECT {cols} FROM transactions WHERE removed_at IS NULL")
         accounts = _from_rows(cur, Account, "SELECT {cols} FROM accounts WHERE removed_at IS NULL")
         bills = _from_rows(cur, Bill, "SELECT {cols} FROM bills WHERE removed_at IS NULL")
@@ -424,13 +440,14 @@ class Syncer:
         }
         classified = classify(txs, accounts, bills, purposes=purposes, overrides=overrides)
         changed = [
-            [new.kind, new.kind_reason, new.id]
+            [new.kind, new.kind_reason, now, new.id]
             for old, new in zip(txs, classified, strict=True)
             if (old.kind, old.kind_reason) != (new.kind, new.kind_reason)
         ]
         if changed:
             cur.executemany(
-                "UPDATE transactions SET kind = ?, kind_reason = ? WHERE id = ?", changed
+                "UPDATE transactions SET kind = ?, kind_reason = ?, changed_at = ? WHERE id = ?",
+                changed,
             )
 
     async def load_all(self) -> list[SyncResult]:
@@ -582,7 +599,7 @@ class Syncer:
                     "VALUES (?, ?, ?)",
                     [account_id, row[0], purpose],
                 )
-            self._reclassify(cur)
+            self._reclassify(cur, self._now_utc())
 
     async def disconnect(self, alias: str) -> None:
         async with self._lock(alias):
@@ -591,7 +608,7 @@ class Syncer:
                     cur.execute(f"DELETE FROM {table} WHERE alias = ?", [alias])
                 cur.execute("DELETE FROM connections WHERE alias = ?", [alias])
                 # Rows of other connections may point at deleted ones (paired_with, matched bills).
-                self._reclassify(cur)
+                self._reclassify(cur, self._now_utc())
 
     def disconnect_impact(self, alias: str) -> DisconnectImpact:
         start, _ = self._window()

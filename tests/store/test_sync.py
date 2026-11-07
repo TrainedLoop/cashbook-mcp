@@ -1,5 +1,5 @@
 import asyncio
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -647,3 +647,76 @@ async def test_next_auto_sync_at_is_stored_and_kept_current(syncer, fake):
     fake.items["item-a"].pop("nextAutoSyncAt")
     await syncer.load("a")
     assert syncer.connections()[0].next_auto_sync_at is None
+
+
+def _stamps(db, tx_id):
+    return rows(db, "SELECT changed_at, last_seen_at FROM transactions WHERE id = ?", [tx_id])[0]
+
+
+async def test_changed_at_set_on_insert_and_kept_by_unchanged_resync(syncer, fake, db, clock):
+    fake.add_item("item-a")
+    fake.add_tx("item-a-bank", "tx-1", "2026-10-01")
+    t0 = clock.value.replace(tzinfo=None)
+    await syncer.add_connection("a", "item-a")
+    assert _stamps(db, "tx-1") == (t0, t0)
+
+    clock.value += timedelta(hours=2)
+    await syncer.load("a")  # nothing changed
+
+    changed_at, last_seen = _stamps(db, "tx-1")
+    assert changed_at == t0
+    assert last_seen == t0 + timedelta(hours=2)  # last_seen_at still moves every sync
+
+
+async def test_changed_at_moves_on_content_change(syncer, fake, db, clock):
+    fake.add_item("item-a")
+    fake.add_tx("item-a-bank", "tx-1", "2026-10-01")
+    fake.add_tx("item-a-bank", "tx-2", "2026-10-02")
+    await syncer.add_connection("a", "item-a")
+    t1 = clock.value.replace(tzinfo=None) + timedelta(hours=3)
+    clock.value += timedelta(hours=3)
+    fake.transactions["item-a-bank"][0]["amount"] = -12.5
+    fake.transactions["item-a-bank"][1]["paymentData"] = {"paymentMethod": "pix"}
+
+    await syncer.load("a")
+
+    assert _stamps(db, "tx-1")[0] == t1
+    assert _stamps(db, "tx-2")[0] == t1
+    assert rows(db, "SELECT payment_method FROM transactions WHERE id = 'tx-2'") == [("PIX",)]
+
+
+async def test_changed_at_moves_on_removal_and_return(syncer, fake, db, clock):
+    fake.add_item("item-a")
+    fake.add_tx("item-a-bank", "tx-1", "2026-10-01")
+    fake.add_tx("item-a-bank", "tx-2", "2026-10-02")
+    await syncer.add_connection("a", "item-a")
+    t0 = clock.value.replace(tzinfo=None)
+    clock.value += timedelta(hours=1)
+    gone = fake.transactions["item-a-bank"].pop(0)
+
+    await syncer.load("a")
+
+    t1 = t0 + timedelta(hours=1)
+    assert rows(db, "SELECT changed_at, removed_at FROM transactions WHERE id = 'tx-1'") == [(t1, t1)]
+    assert _stamps(db, "tx-2")[0] == t0
+
+    clock.value += timedelta(hours=1)
+    fake.transactions["item-a-bank"].insert(0, gone)
+    await syncer.load("a")
+    assert rows(db, "SELECT changed_at, removed_at FROM transactions WHERE id = 'tx-1'") == [
+        (t0 + timedelta(hours=2), None)
+    ]
+
+
+async def test_changed_at_moves_when_reclassification_changes_kind(syncer, fake, db, clock):
+    fake.add_item("item-a")
+    fake.add_tx("item-a-bank", "tx-1", "2026-10-01")
+    await syncer.add_connection("a", "item-a")
+    t0 = clock.value.replace(tzinfo=None)
+    clock.value += timedelta(hours=1)
+
+    syncer.set_purpose("item-a-bank", "investment")  # tx-1 becomes an investment movement
+
+    kind, changed_at = rows(db, "SELECT kind, changed_at FROM transactions WHERE id = 'tx-1'")[0]
+    assert kind == "investment"
+    assert changed_at == t0 + timedelta(hours=1)

@@ -110,5 +110,8 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
     }
     if has_business:
         business = totals(db, month_start, today, "business")
-        overview["business"] = {k: jsonable(business[k]) for k in ("income", "spending", "owner_draws")}
+        keys = ("income", "spending", "owner_draws", "one_off_out", "one_off_in")
+        overview["business"] = {
+            k: jsonable(business[k]) for k in keys if k not in ("one_off_out", "one_off_in") or business[k]
+        }
     return overview

@@ -111,10 +111,13 @@ Steps:
    both; a category only relabels the transaction in groupings and never changes the kind or the totals,
    and it must come from the valid list (list_categories shows the ones in use; a bad_category error returns the full list). Leave
    anything I did not confirm or am unsure about untouched.
-   Kind effects on totals: purchase, fee, loan and other count as spending; income counts as income;
-   refund reduces spending in its own category; internal_transfer, card_bill_payment and investment
-   are left out of income and spending; one_off is reported apart, never in monthly spending or
-   income (for one-off large expenses or asset purchases). Pick the kind by the effect I want.
+   Kind effects on totals - outflows: purchase, fee, loan, other, income and refund count as
+   spending; inflows: income counts as income; refund, purchase, fee and other reduce spending (as
+   refunds); loan inflows are left out. internal_transfer, card_bill_payment and investment are
+   left out, except transfers between a personal and a business connection, which are reported
+   apart (from_business counts as personal income). one_off (manual only, for one-off large
+   expenses or asset purchases) is left out and reported apart as one_off_out / one_off_in. Pick
+   the kind by the effect I want.
 4. At the end report each change_id, the kind and/or category, the number of transactions changed and
    what was left out.
    Any batch can be undone with undo_reclassification(change_id=...).

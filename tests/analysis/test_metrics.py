@@ -210,6 +210,12 @@ def test_excluded_foreign_counts_only_the_requested_side(db):
         db, TxFilters(date_from=MARCH[0], date_to=MARCH[1]), "kind", today=TODAY
     )
     assert out["excluded_foreign"] == 1
+    foreign("fo", "-500.00", "one_off")  # not skipped spending
+    out = summarize_transactions(
+        db, TxFilters(date_from=MARCH[0], date_to=MARCH[1]), "kind", today=TODAY
+    )
+    assert out["excluded_foreign"] == 1
+    assert totals(db, *MARCH)["excluded_foreign"] == 2  # fp and fi, not fo
 
 
 def test_one_off_is_reported_apart_and_categories_still_add_up(db):

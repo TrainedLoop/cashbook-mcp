@@ -74,6 +74,11 @@ def test_business_block_only_with_a_business_connection(db, add_row, today):
     assert block["income"] == "700.00"
     assert block["spending"] == "120.00"
     assert block["owner_draws"] == "0.00"
+    assert "one_off_out" not in block
+    add_row("b-house", "biz", "acc-biz", date(2026, 3, 7), "-900.00", "Equipment", "one_off")
+    block = finance_overview(db, today)["business"]
+    assert block["spending"] == "120.00" and block["one_off_out"] == "900.00"
+    assert "one_off_in" not in block
     # personal figures stay out of the business block and the business out of the personal one
     assert finance_overview(db, today)["month_to_date"]["spending"] == "408.20"
 

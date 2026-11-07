@@ -24,7 +24,7 @@ APART_KEYS = {
 }
 _ZERO = Decimal("0.00")
 # Foreign rows are counted apart, except movements that never were spending or income.
-_NOT_COUNTED_FOREIGN = ("internal_transfer", "card_bill_payment", "investment")
+_NOT_COUNTED_FOREIGN = ("internal_transfer", "card_bill_payment", "investment", "one_off")
 
 
 def scope_clause(scope: Scope) -> tuple[str, list]:

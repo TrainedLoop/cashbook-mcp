@@ -1,6 +1,6 @@
 [project]
 name = "cashbook-mcp"
-version = "0.1.2"
+version = "0.1.3"
 description = "Read-only MCP server over Pluggy financial data."
 readme = "README.md"
 license = "MIT"

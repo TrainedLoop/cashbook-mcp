@@ -469,3 +469,14 @@ async def test_reclassify_tools_and_error_shape(tmp_path):
         assert again["error"] == "already_undone"
     finally:
         db.close()
+
+
+async def test_summarize_schema_exposes_group_by_values(server):
+    async with Client(server) as c:
+        tool = next(t for t in await c.list_tools() if t.name == "summarize_transactions")
+    schema = json.dumps(tool.input_schema["properties"]["group_by"])
+    for value in ("category", "merchant", "month", "week", "account", "kind"):
+        assert f'"{value}"' in schema
+    forms = tool.input_schema["properties"]["group_by"]["anyOf"]
+    assert any(f.get("type") == "array" for f in forms)  # the list form
+    assert any(f.get("type") != "array" for f in forms)  # the single form

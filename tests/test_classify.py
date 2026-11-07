@@ -266,6 +266,19 @@ def test_investment_account_fallback():
     assert run(tx(account_id="i1", pluggy_category="Income taxes"))[0] == "fee"
 
 
+def test_transfer_into_investment_account_still_pairs():
+    accounts = [*BANKS, acct("i1", "invest", number="0009-9")]
+    out = tx("o", "-3000.00", date(2026, 3, 10), "a1", pluggy_category="Transfers")
+    inn = tx("i", "3000.00", date(2026, 3, 10), "i1")
+    got = {t.id: (t.kind, t.kind_reason) for t in
+           classify([out, inn], accounts, [], purposes={"i1": "investment"})}
+    assert got["i"] == ("internal_transfer", "paired_with:o")
+    # A firm category kind on the investment account is not a guess.
+    firm = tx("f", "3000.00", date(2026, 3, 10), "i1", pluggy_category="Fixed income")
+    got = classify([out, firm], accounts, [], purposes={"i1": "investment"})
+    assert got[1].kind == "investment" and got[1].kind_reason.startswith("pluggy_category")
+
+
 def test_override_wins_and_is_reasoned():
     r = classify([tx()], ACCOUNTS, [], overrides={"t1": ("internal_transfer", "c1")})[0]
     assert (r.kind, r.kind_reason) == ("internal_transfer", "manual:c1")

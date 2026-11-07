@@ -89,6 +89,8 @@ def _is_transfer_category(category: str | None) -> bool:
 
 def _guessed(t: Transaction) -> bool:
     """A fallback kind that pairing may replace; manual kinds never are."""
+    if t.kind_reason == "investment_account":
+        return True  # the investment-account fallback is a sign guess like any other
     return t.kind in _GUESSED_KINDS and not (t.kind_reason or "").startswith("manual:")
 
 

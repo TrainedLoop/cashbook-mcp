@@ -206,6 +206,15 @@ for _view in list(COLUMN_DOCS):
     if _view.startswith("v_") and _view != "v_flows":
         COLUMN_DOCS[_view[2:]] = COLUMN_DOCS[_view]
 
+# Personal income as cash_flow, summarize_transactions(direction="in") and finance_overview
+# report it, for an example month; a test checks that the three agree.
+PERSONAL_INCOME_SQL = (
+    "SELECT coalesce(sum(income_amount), 0) "
+    "+ coalesce(sum(amount) FILTER (WHERE flow = 'from_business'), 0) AS income "
+    "FROM v_flows WHERE role = 'personal' "
+    "AND date BETWEEN DATE '2026-10-01' AND DATE '2026-10-31'"
+)
+
 NOTES: list[str] = [
     (
         "Only a single read-only SELECT (or WITH ... SELECT) statement is accepted; "
@@ -227,6 +236,13 @@ NOTES: list[str] = [
         "Transfers between own accounts, card bill payments and investments have flow "
         "internal, card_payment or investment and contribute 0, so they are not "
         "double-counted. Rows in another currency have flow foreign and are not summed."
+    ),
+    (
+        "Income per scope, as the tools report it: business and consolidated income is "
+        "sum(income_amount) over the scope's rows; personal income also counts the money "
+        "received from the business (flow from_business, reported apart too), that is "
+        "sum(income_amount) + sum(amount) where flow = 'from_business'. Personal income for "
+        "one month: " + PERSONAL_INCOME_SQL
     ),
     (
         "kind values: purchase = money out not otherwise classified; "

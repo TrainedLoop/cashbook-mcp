@@ -16,6 +16,8 @@ from cashbook_mcp.analysis.summarize import (
     list_categories,
     summarize_transactions,
 )
+from cashbook_mcp.schema_doc import PERSONAL_INCOME_SQL
+from cashbook_mcp.sql import run_query
 from cashbook_mcp.store.db import Database
 from cashbook_mcp.store.reclassify import list_changes, reclassify, undo
 from cashbook_mcp.store.sync import Syncer
@@ -117,6 +119,18 @@ async def test_scenario(world):
         db, TxFilters(date_from=OCT[0], date_to=OCT[1]), ["category", "month"], today=TODAY
     )
     assert sum((D(str(g["total"])) for g in summary["groups"]), D(0)) == D(str(personal["spending"]))
+
+    # Personal income agrees across cash_flow, summarize_transactions and the documented SQL recipe
+    # (whose example month is this scenario's October).
+    income_in = summarize_transactions(
+        db, TxFilters(date_from=OCT[0], date_to=OCT[1], direction="in"), "month", today=TODAY
+    )
+    (recipe,) = run_query(db, PERSONAL_INCOME_SQL).rows
+    assert (
+        D(str(personal["income"]))
+        == sum((D(str(g["total"])) for g in income_in["groups"]), D(0))
+        == D(str(recipe[0]))
+    )
 
     # Marking the broker cash account as investment moves the unidentified purchase out.
     syncer.set_purpose("item-bro-bank", "investment")

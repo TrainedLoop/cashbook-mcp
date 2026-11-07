@@ -345,7 +345,9 @@ def create_mcp(
 
     @mcp.tool(annotations=READ_ONLY, description=(
         "Income, spending and net per month or week, optionally per account. Internal transfers, card bill "
-        "payments and investment movements are excluded. Income counts only kind=income; refunds lower "
+        "payments and investment movements are excluded. Income per scope: business and consolidated count "
+        "only kind=income; personal also counts money received from the business (also reported apart as "
+        "`from_business`). Refunds lower "
         "spending and are reported as `refunds`. Only BRL rows are summed; `excluded_foreign` counts rows "
         "skipped in other currencies." + SCOPE_NOTE + DATES_NOTE
     ))  # fmt: skip

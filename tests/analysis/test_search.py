@@ -121,6 +121,25 @@ def test_rows_carry_role_and_flow_and_scope_filters(db, add_row):
     assert (full["role"], full["flow"]) == ("business", "spending")
 
 
+def test_scope_keeps_cross_role_transfers_and_drops_same_role_ones(db):
+    with db.write() as cur:
+        cur.execute("UPDATE connections SET role = 'business' WHERE alias = 'second'")
+        cur.execute("UPDATE transactions SET kind_reason = 'paired_with:t-pix-in' WHERE id = 't-pix-out'")
+        cur.execute("UPDATE transactions SET kind_reason = 'paired_with:t-pix-out' WHERE id = 't-pix-in'")
+
+    def ids(**kw):
+        return {r["id"] for r in search_transactions(db, TxFilters(**kw))["rows"]}
+
+    # A transfer between personal and business is money moving between scopes: it shows up.
+    assert "t-pix-out" in ids(scope="personal", direction="out")
+    assert "t-pix-in" in ids(scope="business", direction="in")
+    # A card bill paid inside the same scope stays internal.
+    assert "t-bill-pay" not in ids(scope="personal")
+    # Without scope, v0.1 behavior: internal kinds are excluded whatever their flow.
+    assert not {"t-pix-out", "t-pix-in"} & ids()
+    assert "t-pix-out" in ids(scope="personal", kinds=["internal_transfer"])
+
+
 ALWAYS = {"id", "date", "amount", "alias", "description", "kind", "flow"}
 
 

@@ -93,3 +93,21 @@ Steps:
 
 {SAFETY}
 """
+
+
+def review_classifications() -> str:
+    return f"""Help me review the transactions the server could not classify with confidence.
+
+Steps:
+1. Call review_classification() to get the queue: groups of transactions by counterpart, each with a
+   reason, a total and, when I changed the same counterpart before, a hint with the kinds I used.
+2. Go through the groups one at a time, largest first. For each, tell me who the counterpart is, the
+   transactions (date, amount, account) and the reason it is unclear, and ask me what it really is.
+   A hint is only a suggestion from my earlier changes: never apply it without my answer.
+3. Only for what I confirmed, call reclassify_transactions(ids=[...], kind=...) with the transaction ids of
+   that group and a short note. Leave anything I did not confirm or am unsure about untouched.
+4. At the end report each change_id, the kind, the number of transactions changed and what was left out.
+   Any batch can be undone with undo_reclassification(change_id=...).
+
+{SAFETY}
+"""

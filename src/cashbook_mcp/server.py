@@ -27,6 +27,7 @@ from cashbook_mcp.analysis.metrics import Scope
 from cashbook_mcp.analysis.networth import net_worth as _net_worth
 from cashbook_mcp.analysis.overview import finance_overview as _finance_overview
 from cashbook_mcp.analysis.recurring import find_recurring as _find_recurring
+from cashbook_mcp.analysis.review import review_classification as _review_classification
 from cashbook_mcp.analysis.search import get_transactions as _get_transactions
 from cashbook_mcp.analysis.search import search_transactions as _search_transactions
 from cashbook_mcp.analysis.summarize import cash_flow as _cash_flow
@@ -52,7 +53,7 @@ ALL_TOOL_NAMES = frozenset({
     "finance_overview", "list_connections", "list_accounts", "search_transactions", "get_transactions",
     "list_bills", "list_investments", "get_investment_transactions", "list_loans", "list_categories",
     "summarize_transactions", "cash_flow", "net_worth", "find_recurring", "describe_schema", "query_sql",
-    "reclassify_transactions", "undo_reclassification", "list_reclassifications",
+    "reclassify_transactions", "undo_reclassification", "list_reclassifications", "review_classification",
 })  # fmt: skip
 
 READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
@@ -138,6 +139,7 @@ def create_mcp(
     tz: ZoneInfo,
     now: Callable[[], datetime],
     max_reclassify_per_day: int = 1000,
+    review_min_amount: Decimal = Decimal("500.00"),
     scheduler: Scheduler | None = None,
     auth: AuthProvider | None = None,
     cleanup: Callable[[], Awaitable[None]] | None = None,
@@ -458,6 +460,24 @@ def create_mcp(
     async def list_reclassifications(limit: int = 20) -> dict:
         return await respond(lambda: {"changes": _reclassify.list_changes(db, limit)})
 
+    @mcp.tool(annotations=READ_ONLY, description=(
+        "Review queue: transactions the classifier was unsure about, grouped by counterpart (tax id, else "
+        "account number, else name), largest first. Each group has a reason (unpaired_transfer, "
+        "large_unidentified_inflow, uncategorized_card_credit), its transactions, total and a hint: the kinds "
+        "I used earlier for the same counterpart (a suggestion, never applied). Transactions already "
+        "reclassified are left out. Ask the owner, then use reclassify_transactions. Up to `limit` groups."
+        + DATES_NOTE + SCOPE_NOTE + UNTRUSTED_NOTE
+    ))  # fmt: skip
+    async def review_classification(
+        scope: Scope = "personal", date_from: date | None = None, date_to: date | None = None, limit: int = 20
+    ) -> dict:
+        return await respond(
+            lambda: _review_classification(
+                db, scope=scope, date_from=date_from, date_to=date_to, limit=limit,
+                min_amount=review_min_amount,
+            )
+        )  # fmt: skip
+
     # -- prompts and routes -------------------------------------------------
 
     mcp.prompt(name="monthly_review", description=(
@@ -472,6 +492,10 @@ def create_mcp(
     @mcp.prompt(name="upcoming_bills", description="Bills and expected charges due in the next `days` days.")
     def upcoming_bills(days: int = 15) -> str:
         return prompts.upcoming_bills(days, today=today())
+
+    mcp.prompt(name="review_classifications", description=(
+        "Review the classification queue with the owner, group by group, and reclassify what they confirm."
+    ))(prompts.review_classifications)  # fmt: skip
 
     @mcp.custom_route("/health", methods=["GET"], include_in_schema=False)
     async def health(request: Request) -> JSONResponse:
@@ -516,6 +540,7 @@ def build_app(settings: Settings, secrets: Secrets) -> tuple[FastMCP, AppContext
     mcp = create_mcp(
         db=db, syncer=syncer, tz=settings.tz, now=_utc_now, scheduler=scheduler,
         max_reclassify_per_day=settings.max_reclassify_per_day,
+        review_min_amount=settings.review_min_amount,
         auth=build_auth(settings, secrets), cleanup=pluggy.aclose,
     )  # fmt: skip
     register_admin(mcp, context)

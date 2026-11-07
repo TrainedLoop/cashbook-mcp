@@ -106,7 +106,7 @@ async def test_tools_read_only_annotations(server):
     async with Client(server) as c:
         tools = await c.list_tools()
     assert {t.name for t in tools} == ALL_TOOL_NAMES
-    assert len(ALL_TOOL_NAMES) == 19
+    assert len(ALL_TOOL_NAMES) == 20
     writers = {"reclassify_transactions", "undo_reclassification"}
     for t in tools:
         assert t.annotations is not None, t.name
@@ -176,6 +176,7 @@ async def test_every_tool_answers_with_connection_context(server):
         ("describe_schema", {}),
         ("query_sql", {"sql": "SELECT count(*) AS n FROM v_transactions"}),
         ("list_reclassifications", {}),
+        ("review_classification", {}),
         ("reclassify_transactions", {"ids": ["t-shop"], "kind": "refund"}),
         ("undo_reclassification", {"change_id": "{change_id}"}),
     ]
@@ -268,7 +269,7 @@ async def test_lifespan_runs_scheduler_in_background(tmp_path):
 async def test_prompts_registered_and_name_real_tools(server):
     async with Client(server) as c:
         listed = {p.name: p for p in await c.list_prompts()}
-        assert set(listed) == {"monthly_review", "subscriptions_audit", "upcoming_bills"}
+        assert set(listed) == {"monthly_review", "subscriptions_audit", "upcoming_bills", "review_classifications"}
         r = await c.get_prompt("monthly_review", {"month": "2026-02"})
         text = r.messages[0].content.text
     assert "2026-02-01" in text and "2026-02-28" in text
@@ -277,6 +278,7 @@ async def test_prompts_registered_and_name_real_tools(server):
         prompts.monthly_review("2026-02"),
         prompts.subscriptions_audit(today=day),
         prompts.upcoming_bills(7, today=day),
+        prompts.review_classifications(),
     )
     for body in bodies:
         named = set(prompts.TOOL_CALL.findall(body))

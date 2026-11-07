@@ -21,6 +21,7 @@ from cashbook_mcp.sql import (
     MAX_ROWS,
     MAX_SQL_BYTES,
     MAX_WORKERS,
+    STUCK_RETRY_S,
     TIMEOUT_S,
     TRUNCATED_SUFFIX,
     QueryResult,
@@ -674,19 +675,44 @@ def test_wide_result_memory_is_bounded(ncols):
     assert stats["growth_mb"] < 300, stats
 
 
-def test_busy_when_workers_are_taken(db, monkeypatch):
+def _hold_slots(monkeypatch, deadlines: dict[int, float]) -> threading.BoundedSemaphore:
+    """Every slot taken, by workers with the given deadlines (monotonic)."""
     sem = threading.BoundedSemaphore(1)
-    monkeypatch.setattr(sql_module, "_workers", sem)
     sem.acquire()
-    try:
-        start = time.monotonic()
-        with pytest.raises(SqlRejected) as exc:
-            run_query(db, "SELECT 1", timeout_s=0.3)
-        assert exc.value.reason == "busy"
-        assert time.monotonic() - start >= 0.3
-    finally:
-        sem.release()
+    monkeypatch.setattr(sql_module, "_workers", sem)
+    monkeypatch.setattr(sql_module, "_deadlines", dict(deadlines))
+    return sem
+
+
+def test_busy_says_the_limit_and_when_a_slot_frees(db, monkeypatch):
+    sem = _hold_slots(monkeypatch, {1: time.monotonic() + 7.2})
+    start = time.monotonic()
+    with pytest.raises(SqlRejected) as exc:
+        run_query(db, "SELECT 1", timeout_s=0.3)
+    assert time.monotonic() - start >= 0.3
+    assert exc.value.reason == "busy"
+    assert exc.value.details == {"max_parallel": MAX_WORKERS, "running": 1, "retry_after_s": 7}
+    assert f"all {MAX_WORKERS} query slots are taken" in str(exc.value)
+    assert "other tools" in str(exc.value)
+    sem.release()
+    sql_module._deadlines.clear()
     assert run_query(db, "SELECT 1").rows == [[1]]
+
+
+def test_busy_with_stuck_queries_suggests_a_longer_wait(db, monkeypatch):
+    _hold_slots(monkeypatch, {1: time.monotonic() - 30, 2: time.monotonic() - 5})
+    with pytest.raises(SqlRejected) as exc:
+        run_query(db, "SELECT 1", timeout_s=0.1)
+    assert exc.value.details["retry_after_s"] == STUCK_RETRY_S
+    assert exc.value.details["running"] == 2
+    assert "did not stop when interrupted" in str(exc.value)
+
+
+def test_finished_workers_leave_no_deadline(db):
+    run_query(db, "SELECT 1")
+    with pytest.raises(SqlRejected):
+        run_query(db, "SELECT count(*) FROM range(10000000000) a", timeout_s=0.3)
+    assert sql_module._deadlines == {}
 
 
 def test_parallel_queries_beyond_the_cap_wait_for_a_slot(db):

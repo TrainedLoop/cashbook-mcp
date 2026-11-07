@@ -100,3 +100,16 @@ def test_uncategorized_maps_to_null_category(db, add_row):
     assert [r["id"] for r in res["rows"]] == ["t-nocat"]
     mixed = search_transactions(db, TxFilters(categories=["uncategorized", "Groceries"]))
     assert {r["id"] for r in mixed["rows"]} == {"t-nocat", "t-card-1"}
+
+
+def test_rows_carry_role_and_flow_and_scope_filters(db, add_row):
+    with db.write() as cur:
+        cur.execute("UPDATE connections SET role = 'business' WHERE alias = 'second'")
+    add_row("b-out", "second", "acc-second", date(2026, 3, 6), "-120.00", "Tool", "purchase")
+    biz = search_transactions(db, TxFilters(scope="business"))["rows"]
+    assert [(r["id"], r["role"], r["flow"]) for r in biz] == [("b-out", "business", "spending")]
+    personal = search_transactions(db, TxFilters(scope="personal"))["rows"]
+    assert personal and {r["role"] for r in personal} == {"personal"}
+    both = search_transactions(db, TxFilters(scope="consolidated"))["rows"]
+    assert {r["role"] for r in both} == {"personal", "business"}
+    assert get_transactions(db, ["b-out"])[0]["flow"] == "spending"

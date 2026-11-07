@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from cashbook_mcp.store.db import Database
 
 from .filters import jsonable
+from .metrics import totals
 from .summarize import cash_flow, list_categories
 
 
@@ -37,6 +38,7 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
             "WHERE due_date BETWEEN ? AND ? ORDER BY due_date, id",
             [today, today + timedelta(days=days_ahead)],
         )
+        has_business = cur.execute("SELECT count(*) FROM connections WHERE role = 'business'").fetchone()[0] > 0
         problems = _dicts(
             cur,
             "SELECT alias, status, last_sync_error AS error FROM connections "
@@ -50,7 +52,7 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
     month_to_date = dict(flow["totals"])
     if "excluded_foreign" in flow:
         month_to_date["excluded_foreign"] = flow["excluded_foreign"]
-    return {
+    overview = {
         "accounts": accounts,
         "cards": cards,
         "bills_due": bills_due,
@@ -58,3 +60,7 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
         "top_categories": list_categories(db, month_start, today)[:5],
         "connections_with_problems": problems,
     }
+    if has_business:
+        business = totals(db, month_start, today, "business")
+        overview["business"] = {k: jsonable(business[k]) for k in ("income", "spending", "owner_draws")}
+    return overview

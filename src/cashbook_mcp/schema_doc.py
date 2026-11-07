@@ -42,7 +42,8 @@ _TRANSACTION_DOCS: dict[str, str] = {
     "kind": "Server classification: purchase, income, internal_transfer, "
     "card_bill_payment, refund, investment, fee, loan or other (see notes).",
     "kind_reason": "Machine-readable reason for kind, e.g. matched_card_bill:<bill_id>, "
-    "counterpart_is_own_account:<alias>, paired_with:<transaction id> (the other side of a "
+    "counterpart_is_own_account:<alias>, investment_account (the account's purpose is "
+    "investment), manual:<batch id> (set by a reclassification), paired_with:<transaction id> (the other side of a "
     "transfer between own accounts), pluggy_category:<category>, sign.",
     "text_suspicious": "True if a text column of this row was flagged as a possible "
     "prompt injection (its value is wrapped in the suspicious marker).",
@@ -155,6 +156,7 @@ COLUMN_DOCS: dict[str, dict[str, str]] = {
         "alias": "Connection alias chosen by the owner.",
         "item_id": "Provider item (bank connection) id.",
         "connector_name": "Bank name.",
+        "role": "personal or business: whose money the connection holds.",
         "created_at": "UTC timestamp when the connection was added.",
         "status": "Provider item status, e.g. UPDATED, LOGIN_ERROR, OUTDATED.",
         "execution_status": "Provider status of the last bank refresh.",
@@ -165,6 +167,13 @@ COLUMN_DOCS: dict[str, dict[str, str]] = {
         "consent_expires_at": "UTC timestamp when the bank consent expires.",
         "last_synced_at": "UTC timestamp of the last successful sync into this store.",
         "last_sync_error": "Error of the last failed sync, if any.",
+    },
+    "account_settings": {
+        "account_id": "Account the setting applies to (v_accounts.id).",
+        "alias": _ROW_META["alias"],
+        "purpose": "regular or investment. An investment account holds invested money: its "
+        "transactions get kind investment (kind_reason investment_account) and it is not spending. "
+        "No row means regular.",
     },
     "sync_runs": {
         "id": "Sync run id.",

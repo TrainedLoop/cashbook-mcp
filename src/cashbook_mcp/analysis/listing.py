@@ -59,7 +59,11 @@ def list_connections(db: Database) -> list[dict]:
     finally:
         cur.close()
     accounts: dict[str, list[dict]] = {}
-    for a in _rows(db, "SELECT id, alias, type, subtype, name FROM v_accounts ORDER BY alias, name"):
+    for a in _rows(
+        db,
+        "SELECT a.id, a.alias, a.type, a.subtype, a.name, coalesce(s.purpose, 'regular') AS purpose "
+        "FROM v_accounts a LEFT JOIN account_settings s ON s.account_id = a.id ORDER BY a.alias, a.name",
+    ):
         accounts.setdefault(a.pop("alias"), []).append(a)
     out = []
     for c in conns:
@@ -69,6 +73,7 @@ def list_connections(db: Database) -> list[dict]:
             {
                 "alias": c.alias,
                 "bank": c.connector_name,
+                "role": c.role,
                 "status": c.status,
                 "execution_status": c.execution_status,
                 "error_code": c.error_code,

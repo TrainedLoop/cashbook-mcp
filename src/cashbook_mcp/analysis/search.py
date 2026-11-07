@@ -31,6 +31,8 @@ COLUMNS = (
     "kind_reason",
     "text_suspicious",
     "suspicion_reasons",
+    "role",
+    "flow",
 )
 _SELECT = ", ".join(COLUMNS)
 
@@ -63,7 +65,7 @@ def search_transactions(
         where = f"{where} AND {keyset}" if where else f"WHERE {keyset}"
         params = [*params, d, d, i]
     sql = (
-        f"SELECT {_SELECT} FROM v_transactions {where} "
+        f"SELECT {_SELECT} FROM v_flows {where} "
         "ORDER BY date DESC, id DESC LIMIT ?"
     )
     cur = db.read()
@@ -89,7 +91,7 @@ def get_transactions(db: Database, ids: list[str]) -> list[dict]:
     cur = db.read()
     try:
         fetched = cur.execute(
-            f"SELECT {_SELECT} FROM v_transactions WHERE id IN ({marks}) "
+            f"SELECT {_SELECT} FROM v_flows WHERE id IN ({marks}) "
             "ORDER BY date DESC, id DESC",
             list(ids),
         ).fetchall()

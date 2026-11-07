@@ -183,8 +183,9 @@ async def test_search_and_get_shapes(server):
     assert [r["id"] for r in page["rows"]] == ["t-evil", "t-shop"]
     assert set(page["rows"][0]) == {
         "id", "date", "alias", "account_id", "amount", "currency", "kind", "category",
-        "description", "suspicious",
+        "description", "suspicious", "role", "flow",
     }  # fmt: skip
+    assert (page["rows"][0]["role"], page["rows"][0]["flow"]) == ("personal", "spending")
     assert page["rows"][0]["suspicious"] is True
     assert page["suspicious_values"] == 1
     nxt = await call(server, "search_transactions", {"direction": "out", "limit": 2, "cursor": page["next_cursor"]})
@@ -355,3 +356,62 @@ async def test_prompts_render_explicit_dates(server):
     assert "days_ahead=7" in bills
     # Leap-day edge: twelve months before 2024-02-29 is clamped to 2023-02-28.
     assert 'date_from="2023-02-28"' in prompts.subscriptions_audit(today=date(2024, 2, 29))
+
+
+async def test_scope_defaults_to_personal_and_unknown_scope_is_an_error(server):
+    flow = await call(server, "cash_flow", {"date_from": "2026-03-01", "date_to": "2026-03-31"})
+    assert flow["scope"] == "personal"
+    business = await call(
+        server, "cash_flow", {"date_from": "2026-03-01", "date_to": "2026-03-31", "scope": "business"}
+    )
+    assert business["scope"] == "business"
+    assert business["totals"]["spending"] == "0.00"
+    cats = await call(server, "list_categories", {})
+    assert cats["scope"] == "personal" and cats["categories"]
+    assert (await call(server, "list_categories", {"scope": "business"}))["categories"] == []
+    summary = await call(server, "summarize_transactions", {"group_by": "category", "scope": "business"})
+    assert summary["groups"] == [] and summary["scope"] == "business"
+    async with Client(server) as c:
+        for name, args in [
+            ("cash_flow", {"date_from": "2026-03-01", "date_to": "2026-03-31", "scope": "nope"}),
+            ("summarize_transactions", {"group_by": "category", "scope": "nope"}),
+            ("list_categories", {"scope": "nope"}),
+            ("search_transactions", {"scope": "nope"}),
+        ]:
+            r = await c.call_tool(name, args, raise_on_error=False)
+            assert r.is_error, name
+
+
+async def test_search_scope_filters_rows(server):
+    business = await call(server, "search_transactions", {"scope": "business"})
+    assert business["rows"] == []
+    personal = await call(server, "search_transactions", {"scope": "personal", "limit": 1})
+    assert len(personal["rows"]) == 1
+    full = await call(server, "get_transactions", {"ids": ["t-shop"]})
+    assert full["transactions"][0]["role"] == "personal"
+    assert full["transactions"][0]["flow"] == "spending"
+
+
+async def test_summarize_accepts_two_group_by_dimensions(server):
+    out = await call(
+        server,
+        "summarize_transactions",
+        {"group_by": ["category", "month"], "date_from": "2026-03-01", "date_to": "2026-03-31"},
+    )
+    assert out["groups"]
+    assert out["groups"][0]["key"] == ["Groceries", "2026-03"]
+
+
+async def test_list_connections_shows_role_and_purpose(server):
+    out = await call(server, "list_connections")
+    main = next(c for c in out["connections"] if c["alias"] == "main")
+    assert main["role"] == "personal"
+    assert main["accounts"][0]["purpose"] == "regular"
+
+
+async def test_describe_schema_lists_flows_not_spending(server):
+    out = await call(server, "describe_schema")
+    names = {r["name"] for r in out["relations"]}
+    assert "v_flows" in names and "v_spending" not in names
+    assert "account_settings" in names
+    assert any("v_flows" in n and "totals" in n for n in out["notes"])

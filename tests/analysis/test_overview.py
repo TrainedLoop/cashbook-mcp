@@ -48,3 +48,25 @@ def test_overview_reports_skipped_foreign_rows(db, add_row, today):
     mtd = finance_overview(db, today)["month_to_date"]
     assert mtd["spending"] == "408.20"
     assert mtd["excluded_foreign"] == 1
+
+
+def test_business_block_only_with_a_business_connection(db, add_row, today):
+    assert "business" not in finance_overview(db, today)
+    with db.write() as cur:
+        cur.execute(
+            "INSERT INTO connections (alias, item_id, connector_name, created_at, status, role) "
+            "VALUES ('biz', 'item-3', 'Bank C', TIMESTAMP '2026-01-01', 'UPDATED', 'business')"
+        )
+        cur.execute(
+            "INSERT INTO accounts (id, alias, item_id, type, subtype, name, balance, currency, "
+            "first_seen_at, last_seen_at) VALUES ('acc-biz', 'biz', 'item-3', 'BANK', 'X', 'Biz', "
+            "10.00, 'BRL', TIMESTAMP '2026-01-01', TIMESTAMP '2026-01-01')"
+        )
+    add_row("b-in", "biz", "acc-biz", date(2026, 3, 4), "700.00", "Client", "income")
+    add_row("b-out", "biz", "acc-biz", date(2026, 3, 6), "-120.00", "Tool", "purchase")
+    block = finance_overview(db, today)["business"]
+    assert block["income"] == "700.00"
+    assert block["spending"] == "120.00"
+    assert block["owner_draws"] == "0.00"
+    # personal figures stay out of the business block and the business out of the personal one
+    assert finance_overview(db, today)["month_to_date"]["spending"] == "408.20"

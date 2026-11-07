@@ -1,6 +1,5 @@
 import dataclasses
 import shutil
-from datetime import datetime
 
 import duckdb
 import pytest
@@ -163,7 +162,7 @@ def test_migrations_ship_in_package():
     assert MIGRATIONS_DIR.parent.name == "store"
 
 
-def test_v02_migration_preserves_existing_connections(tmp_path):
+def test_v02_migration_wipes_v01_data(tmp_path):
     path = tmp_path / "c.duckdb"
     v1_dir = tmp_path / "v1"
     v1_dir.mkdir()
@@ -172,10 +171,17 @@ def test_v02_migration_preserves_existing_connections(tmp_path):
     assert db.schema_version() == 1
     with db.write() as cur:
         cur.execute(
-            "INSERT INTO connections VALUES "
-            "('main', 'item-1', 'Bank', '2026-01-02 03:04:05', 'UPDATED', 'SUCCESS', "
-            "'E1', 'msg', '2026-02-03 04:05:06', '2026-12-31 00:00:00', "
-            "'2026-03-04 05:06:07', 'oops')"
+            "INSERT INTO connections (alias, item_id, connector_name, created_at) "
+            "VALUES ('main', 'item-1', 'Bank', now())"
+        )
+        cur.execute(
+            "INSERT INTO accounts VALUES ('a1', 'main', 'item-1', 'BANK', 'CHECKING', 'Acc', "
+            "NULL, NULL, 10, 'BRL', NULL, NULL, now(), now(), NULL)"
+        )
+        cur.execute(
+            "INSERT INTO transactions (id, alias, account_id, date, amount, currency, "
+            "description, first_seen_at, last_seen_at) "
+            "VALUES ('t1', 'main', 'a1', '2026-01-02', -5, 'BRL', 'x', now(), now())"
         )
     db.close()
 
@@ -183,16 +189,21 @@ def test_v02_migration_preserves_existing_connections(tmp_path):
     try:
         assert db.schema_version() >= 2
         cur = db.read()
-        cols = [
-            "alias", "item_id", "connector_name", "created_at", "status", "execution_status",
-            "error_code", "error_message", "last_updated_at", "consent_expires_at",
-            "last_synced_at", "last_sync_error", "role",
+        tables = [
+            r[0]
+            for r in cur.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_catalog='cb' AND table_type='BASE TABLE' "
+                "AND table_name <> 'schema_version'"
+            ).fetchall()
         ]
-        row = cur.execute(f"SELECT {', '.join(cols)} FROM connections").fetchone()
-        assert row == (
-            "main", "item-1", "Bank", datetime(2026, 1, 2, 3, 4, 5), "UPDATED", "SUCCESS",
-            "E1", "msg", datetime(2026, 2, 3, 4, 5, 6), datetime(2026, 12, 31),
-            datetime(2026, 3, 4, 5, 6, 7), "oops", "personal",
-        )
+        assert {"connections", "transactions", "account_settings", "classification_overrides"} <= set(tables)
+        for t in tables:
+            assert cur.execute(f"SELECT count(*) FROM {t}").fetchone() == (0,), t
+        cols = {r[0] for r in cur.execute("DESCRIBE connections").fetchall()}
+        assert "role" in cols
+        view_cols = {r[0] for r in cur.execute("DESCRIBE v_transactions").fetchall()}
+        assert {"installment_number", "installment_total", "purchase_date"} <= view_cols
     finally:
         db.close()
+    assert (tmp_path / "c.duckdb.bak-1").exists()

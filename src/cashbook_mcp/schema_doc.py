@@ -36,6 +36,9 @@ _TRANSACTION_DOCS: dict[str, str] = {
     "merchant_name": "Merchant name for card purchases." + _UNTRUSTED,
     "pluggy_category": "Category assigned by the data provider (English).",
     "bill_id": "Credit-card bill this transaction belongs to (v_bills.id), if any.",
+    "installment_number": "Card installment number (1-based), if the purchase is in installments.",
+    "installment_total": "Total installments of the card purchase, if in installments.",
+    "purchase_date": "Original purchase date of a card installment, if known.",
     "kind": "Server classification: purchase, income, internal_transfer, "
     "card_bill_payment, refund, investment, fee, loan or other (see notes).",
     "kind_reason": "Machine-readable reason for kind, e.g. matched_card_bill:<bill_id>, "

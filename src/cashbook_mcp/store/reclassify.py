@@ -57,6 +57,12 @@ def _prepare_note(note: str | None, tool_names: frozenset[str]) -> str | None:
     return wrap_suspicious(text) if suspicion_reasons([text], tool_names) else text
 
 
+def _change_stamp(cur, now: datetime) -> datetime:
+    """`now`, or the newest changed_at when a concurrent sync already stamped later."""
+    newest = cur.execute("SELECT max(changed_at) FROM transactions").fetchone()[0]
+    return max(now, newest) if newest is not None else now
+
+
 def _valid_categories(cur) -> dict[str, str]:
     """{lowercase: canonical spelling}: provider categories in the store, then EXTRA_CATEGORIES."""
     valid: dict[str, str] = {}
@@ -183,11 +189,14 @@ def reclassify(
                 "category = excluded.category, change_id = excluded.change_id",
                 [[i, live[i][0], category, change_id] for i in cat_todo],
             )
-        # An override written or dropped for a row is a change of that row.
+        # An override written or dropped for a row is a change of that row. The stamp is taken
+        # under the write lock and never older than an existing one, so a list_changes cursor
+        # cannot have passed it.
+        stamp = _change_stamp(cur, created)
         cur.executemany(
-            "UPDATE transactions SET changed_at = ? WHERE id = ?", [[created, i] for i in todo]
+            "UPDATE transactions SET changed_at = ? WHERE id = ?", [[stamp, i] for i in todo]
         )
-        Syncer._reclassify(cur, created)
+        Syncer._reclassify(cur, stamp)
         changes = []
         for i in todo:
             change: dict = {"id": i}
@@ -215,18 +224,19 @@ def undo(db: Database, change_id: str, *, now: datetime) -> dict:
             [change_id, change_id],
         ).fetchone()[0]
         when = _naive_utc(now)
+        stamp = _change_stamp(cur, when)
         cur.execute(
             "UPDATE transactions SET changed_at = ? WHERE id IN ("
             "SELECT transaction_id FROM classification_overrides WHERE change_id = ? "
             "UNION SELECT transaction_id FROM category_overrides WHERE change_id = ?)",
-            [when, change_id, change_id],
+            [stamp, change_id, change_id],
         )
         cur.execute("DELETE FROM classification_overrides WHERE change_id = ?", [change_id])
         cur.execute("DELETE FROM category_overrides WHERE change_id = ?", [change_id])
         cur.execute(
             "UPDATE classification_changes SET undone_at = ? WHERE change_id = ?", [when, change_id]
         )
-        Syncer._reclassify(cur, when)
+        Syncer._reclassify(cur, stamp)
     return {"change_id": change_id, "reverted": int(reverted)}
 
 

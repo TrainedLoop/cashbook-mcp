@@ -72,8 +72,8 @@ def _populate(db: Database, *, loaded: bool) -> None:
             cur.execute(
                 "INSERT INTO transactions (id, alias, account_id, date, amount, currency, description, "
                 "merchant_name, pluggy_category, kind, kind_reason, text_suspicious, first_seen_at, "
-                "last_seen_at) VALUES (?, 'main', 'acc-main', ?, ?, 'BRL', ?, ?, ?, ?, 'test', ?, ?, ?)",
-                [id, d, Decimal(amount), desc, merchant, cat, kind, id == "t-evil", SEEN, SEEN],
+                "last_seen_at, changed_at) VALUES (?, 'main', 'acc-main', ?, ?, 'BRL', ?, ?, ?, ?, 'test', ?, ?, ?, ?)",
+                [id, d, Decimal(amount), desc, merchant, cat, kind, id == "t-evil", SEEN, SEEN, SEEN],
             )
         if loaded:
             cur.execute(

@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -232,3 +232,19 @@ def test_category_override_and_undo_move_changed_at(db):
     assert changed_at(db, "t-4") == SEEN
     undo(db, out["change_id"], now=datetime(2026, 4, 2, 9, 0, tzinfo=UTC))
     assert changed_at(db, "t-3") == datetime(2026, 4, 2, 9, 0)
+
+
+def test_reclassify_and_undo_never_stamp_older_than_existing_changes(db):
+    """A sync that committed later stamps first must not end up ahead of the reclassification."""
+    future = datetime(2026, 4, 5, 8, 0)  # newer than NOW and than the undo's `now`
+    with db.write() as cur:
+        cur.execute("UPDATE transactions SET changed_at = ? WHERE id = 't-4'", [future])
+    out = run(db, ["t-1"], kind="refund")
+    assert changed_at(db, "t-1") == future
+    assert changed_at(db, "t-1") >= changed_at(db, "t-4")
+    created = db.read().execute("SELECT created_at FROM classification_changes").fetchone()[0]
+    assert created == datetime(2026, 3, 31, 15, 0)  # the journal keeps the call's own time
+    with db.write() as cur:
+        cur.execute("UPDATE transactions SET changed_at = ? WHERE id = 't-4'", [future + timedelta(days=1)])
+    undo(db, out["change_id"], now=NOW)
+    assert changed_at(db, "t-1") == future + timedelta(days=1)

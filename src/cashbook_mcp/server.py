@@ -22,6 +22,7 @@ from cashbook_mcp import prompts
 from cashbook_mcp.admin_web.api import AdminContext, admin_routes
 from cashbook_mcp.admin_web.identity import GoogleIdentity
 from cashbook_mcp.analysis import listing
+from cashbook_mcp.analysis.changes import DEFAULT_LIMIT as DEFAULT_CHANGES_LIMIT
 from cashbook_mcp.analysis.changes import list_changes as _list_changes
 from cashbook_mcp.analysis.filters import TxFilters, today_in
 from cashbook_mcp.analysis.forecast import cash_forecast as _cash_forecast
@@ -62,7 +63,6 @@ ALL_TOOL_NAMES = frozenset({
     "cash_forecast", "list_changes",
 })  # fmt: skip
 
-DEFAULT_CHANGES_LIMIT = 100
 READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
 WRITE = {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
 LOADING = {"status": "loading", "message": "First data load in progress; retry in a minute."}
@@ -271,15 +271,21 @@ def create_mcp(
         "(new, updated or removed). A row changes when it is first synced, its data changes, it disappears from "
         "the bank, or it is reclassified. For routines: store `next_cursor` and pass it as `cursor` next time to "
         "read only what changed since; it is always returned, even when nothing changed. Without a cursor it starts "
-        "7 days back. Pages of `limit` rows (default 100, max 200); `has_more` says whether more follow. scope "
+        "7 days back, or at `since` (ignored when a cursor is given); first run: pass since=<now> to start fresh, "
+        "then keep next_cursor. Pages of `limit` rows (default 100, max 200); `has_more` says whether more follow. scope "
         "narrows to personal, business or consolidated (default: all connections). Boleto payments carry the "
         "beneficiary's CNPJ/name in the counterpart fields; the barcode is not provided by the data source."
         + UNTRUSTED_NOTE
     ))  # fmt: skip
     async def list_changes(
-        cursor: str | None = None, limit: int = DEFAULT_CHANGES_LIMIT, scope: Scope | None = None
+        cursor: str | None = None,
+        limit: int = DEFAULT_CHANGES_LIMIT,
+        scope: Scope | None = None,
+        since: datetime | None = None,
     ) -> dict:
-        return await respond(lambda: _list_changes(db, now(), cursor=cursor, limit=limit, scope=scope))
+        return await respond(
+            lambda: _list_changes(db, now(), cursor=cursor, limit=limit, scope=scope, since=since)
+        )
 
     @mcp.tool(annotations=READ_ONLY, description=(
         "Full transaction rows by id (at most 100 ids), including counterpart, merchant, category, kind, "

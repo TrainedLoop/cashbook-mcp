@@ -31,7 +31,7 @@ Every response carries `data_as_of` per connection and any connection problem.
 | `net_worth`, `cash_forecast` | Net worth over time; projected cash balance for the next 30 to 90 days |
 | `find_recurring`, `recurring_changes` | Recurring-charge candidates; price increases, new, stopped and duplicate charges |
 | `review_classification` | Queue of transactions the server is unsure about, with hints |
-| `reclassify_transactions`, `undo_reclassification`, `list_reclassifications` | The one local write path: change a transaction's kind, undo a batch, list batches |
+| `reclassify_transactions`, `undo_reclassification`, `list_reclassifications` | The one local write path: change a transaction's kind and/or category, undo a batch, list batches |
 | `describe_schema`, `query_sql` | The schema, and `SELECT`/`WITH`-only SQL over it |
 
 All tools are read-only except `reclassify_transactions` and `undo_reclassification`, which change local labels only.

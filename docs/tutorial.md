@@ -90,7 +90,7 @@ Tools that report money take `scope`: `personal` (default), `business` or `conso
 
 ## What the tools can and cannot do
 
-- Everything is read-only toward Pluggy. Locally there is one write path: the assistant can change the kind of specific transactions (`reclassify_transactions`) after asking you. Each change is journaled with a note, capped per day (`MAX_RECLASSIFY_PER_DAY`) and reversible with `undo_reclassification`; `list_reclassifications` shows the history.
+- Everything is read-only toward Pluggy. Locally there is one write path: the assistant can change the kind or the category of specific transactions (`reclassify_transactions`) after asking you. Each change is journaled with a note, capped per day (`MAX_RECLASSIFY_PER_DAY`) and reversible with `undo_reclassification`; `list_reclassifications` shows the history.
 - `query_sql` runs a single `SELECT` or `WITH` statement with a 10 s timeout and a 1,000-row cap. Anything else is refused.
 - Text from transactions is written by third parties and is flagged and capped; the assistant is told to treat it as data.
 

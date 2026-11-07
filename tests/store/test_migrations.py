@@ -1,5 +1,6 @@
 import dataclasses
 import shutil
+from datetime import datetime
 
 import duckdb
 import pytest
@@ -160,3 +161,38 @@ def test_migrations_ship_in_package():
     assert (MIGRATIONS_DIR / "0001_initial.sql").is_file()
     assert MIGRATIONS_DIR.name == "migrations"
     assert MIGRATIONS_DIR.parent.name == "store"
+
+
+def test_v02_migration_preserves_existing_connections(tmp_path):
+    path = tmp_path / "c.duckdb"
+    v1_dir = tmp_path / "v1"
+    v1_dir.mkdir()
+    shutil.copy(MIGRATIONS_DIR / "0001_initial.sql", v1_dir)
+    db = Database.open(path, KEY, migrations_dir=v1_dir)
+    assert db.schema_version() == 1
+    with db.write() as cur:
+        cur.execute(
+            "INSERT INTO connections VALUES "
+            "('main', 'item-1', 'Bank', '2026-01-02 03:04:05', 'UPDATED', 'SUCCESS', "
+            "'E1', 'msg', '2026-02-03 04:05:06', '2026-12-31 00:00:00', "
+            "'2026-03-04 05:06:07', 'oops')"
+        )
+    db.close()
+
+    db = Database.open(path, KEY)
+    try:
+        assert db.schema_version() >= 2
+        cur = db.read()
+        cols = [
+            "alias", "item_id", "connector_name", "created_at", "status", "execution_status",
+            "error_code", "error_message", "last_updated_at", "consent_expires_at",
+            "last_synced_at", "last_sync_error", "role",
+        ]
+        row = cur.execute(f"SELECT {', '.join(cols)} FROM connections").fetchone()
+        assert row == (
+            "main", "item-1", "Bank", datetime(2026, 1, 2, 3, 4, 5), "UPDATED", "SUCCESS",
+            "E1", "msg", datetime(2026, 2, 3, 4, 5, 6), datetime(2026, 12, 31),
+            datetime(2026, 3, 4, 5, 6, 7), "oops", "personal",
+        )
+    finally:
+        db.close()

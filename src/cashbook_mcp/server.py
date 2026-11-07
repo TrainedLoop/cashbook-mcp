@@ -351,7 +351,8 @@ def create_mcp(
         "payments and investment movements are excluded. Income per scope: business and consolidated count "
         "only kind=income; personal also counts money received from the business (also reported apart as "
         "`from_business`). Refunds lower "
-        "spending and are reported as `refunds`. Only BRL rows are summed; `excluded_foreign` counts rows "
+        "spending and are reported as `refunds`. Manual one_off rows are in neither; they are reported apart "
+        "as `one_off_out` and `one_off_in`. Only BRL rows are summed; `excluded_foreign` counts rows "
         "skipped in other currencies." + SCOPE_NOTE + DATES_NOTE
     ))  # fmt: skip
     async def cash_flow(
@@ -461,8 +462,14 @@ def create_mcp(
 
     @mcp.tool(annotations=WRITE, description=(
         "Change the kind and/or the category of up to 200 transactions (kind: one of the listed values, see "
-        "describe_schema; category: one of the valid categories, case-insensitive). Give at least one. Changes "
-        "only the local label in this store, never the bank. A category changes only the label used by groupings "
+        "describe_schema; category: one of the valid categories, case-insensitive). Give at least one. "
+        "Effect on totals - outflows: purchase, fee, loan, other, income and refund count as spending; "
+        "inflows: income counts as income; refund, purchase, fee and other reduce spending (as refunds); "
+        "loan inflows are left out. internal_transfer, card_bill_payment and investment are left out, "
+        "except transfers between a personal and a business connection, which are reported apart "
+        "(from_business counts as personal income). one_off (manual only, for one-off large expenses or "
+        "asset purchases) is left out and reported apart as one_off_out / one_off_in. "
+        "Changes only the local label in this store, never the bank. A category changes only the label used by groupings "
         "and filters (summaries, list_categories), never the kind or the totals; a category override does not "
         "change how the kind is classified. Categories must come from the valid list: the categories in use "
         "(list_categories shows those) plus Rent, Housing, Utilities, Education and Childcare; an unknown one "

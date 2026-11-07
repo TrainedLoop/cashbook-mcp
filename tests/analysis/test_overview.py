@@ -74,6 +74,11 @@ def test_business_block_only_with_a_business_connection(db, add_row, today):
     assert block["income"] == "700.00"
     assert block["spending"] == "120.00"
     assert block["owner_draws"] == "0.00"
+    assert "one_off_out" not in block
+    add_row("b-house", "biz", "acc-biz", date(2026, 3, 7), "-900.00", "Equipment", "one_off")
+    block = finance_overview(db, today)["business"]
+    assert block["spending"] == "120.00" and block["one_off_out"] == "900.00"
+    assert "one_off_in" not in block
     # personal figures stay out of the business block and the business out of the personal one
     assert finance_overview(db, today)["month_to_date"]["spending"] == "408.20"
 
@@ -88,3 +93,11 @@ def test_overview_has_forecast_block(db, today):
     events = cash_forecast(db, today, days=30)["events"]
     assert block["low_confidence_events"] == sum(e["confidence"] == "low" for e in events) > 0
     assert set(block["lowest"]) == {"date", "balance"}
+
+
+def test_overview_shows_one_off_only_when_non_zero(db, add_row, today):
+    assert "one_off_out" not in finance_overview(db, today)["month_to_date"]
+    add_row("t-house", "main", "acc-main", date(2026, 3, 14), "-900.00", "Down payment", "one_off")
+    mtd = finance_overview(db, today)["month_to_date"]
+    assert mtd["spending"] == "408.20" and mtd["one_off_out"] == "900.00"
+    assert "one_off_in" not in mtd

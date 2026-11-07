@@ -73,7 +73,7 @@ Each connection has a role, `personal` or `business` (suggested from a 14-digit 
 - `business`: business connections. Owner draws (`to_personal`) and contributions (`from_personal`) are reported apart, not as spending.
 - `consolidated`: everything; transfers between roles are excluded.
 
-Refunds reduce spending in the group they belong to, so the categories of a period add up to its spending. Agent SQL should use `v_flows` for money totals; `describe_schema` gives the personal income query that matches `cash_flow`. With a scope, `search_transactions` and raw `kinds` summaries leave out internal movements by `flow` (`internal`, `card_payment`), so transfers between personal and business show up; without one they leave out the internal kinds, as in v0.1.
+Kind `one_off` is manual only (classification never assigns it) and gets flow `one_off`, which adds nothing to spending or income; `cash_flow` and `totals` report it apart as `one_off_out` and `one_off_in`, `finance_overview` shows them when non-zero, and recurring detection ignores those rows. Refunds reduce spending in the group they belong to, so the categories of a period add up to its spending. Agent SQL should use `v_flows` for money totals; `describe_schema` gives the personal income query that matches `cash_flow`. With a scope, `search_transactions` and raw `kinds` summaries leave out internal movements by `flow` (`internal`, `card_payment`), so transfers between personal and business show up; without one they leave out the internal kinds, as in v0.1.
 
 ## Classification pipeline
 
@@ -81,7 +81,7 @@ Kinds are derived inside one write transaction after every load, role or purpose
 
 1. per-transaction rules: bill matches, own-account and owner tax id matches, Pluggy category kinds, then the sign. On an account marked `investment`, an unidentified movement becomes `investment` (`investment_account`) instead of spending or income;
 2. manual overrides (`manual:<change_id>`);
-3. pairing of an outflow and an inflow of the same amount within three days across own accounts (`paired_with:<id>`). Pairing only rewrites guessed kinds; manual sides are never rewritten. A manual `internal_transfer`, `card_bill_payment` or `investment` side counts as evidence; any other manual kind rules the pair out.
+3. pairing of an outflow and an inflow of the same amount within three days across own accounts (`paired_with:<id>`). Pairing only rewrites guessed kinds; manual sides are never rewritten. A manual `internal_transfer`, `card_bill_payment` or `investment` side counts as evidence; any other manual kind (including `one_off`) rules the pair out.
 
 ## The local write path
 

@@ -33,7 +33,8 @@ def test_cash_flow_excludes_internal(db, today):
     res = cash_flow(db, date(2026, 3, 1), date(2026, 3, 31), today=today)
     assert res["periods"] == [
         {"period": "2026-03", "income": "5000.00", "refunds": "0.00", "spending": "408.20",
-         "net": "4591.80", "from_business": "0.00", "to_business": "0.00"}
+         "net": "4591.80", "one_off_out": "0.00", "one_off_in": "0.00",
+         "from_business": "0.00", "to_business": "0.00"}
     ]
     assert res["totals"]["net"] == "4591.80"
 
@@ -167,7 +168,7 @@ def test_cash_flow_card_payment_and_refund(db, add_row, today):
     res = cash_flow(db, date(2026, 3, 1), date(2026, 3, 31), today=today)
     assert res["totals"] == {
         "income": "5000.00", "refunds": "20.00", "spending": "388.20", "net": "4611.80",
-        "from_business": "0.00", "to_business": "0.00",
+        "one_off_out": "0.00", "one_off_in": "0.00", "from_business": "0.00", "to_business": "0.00",
     }  # fmt: skip
     assert res["periods"][0]["refunds"] == "20.00"
     assert res["periods"][0]["income"] == "5000.00"
@@ -247,3 +248,15 @@ def test_limit_bounds(db, today):
     for bad in (0, 201, -1):
         with pytest.raises(ValueError):
             summarize_transactions(db, TxFilters(), "category", today=today, limit=bad)
+
+
+def test_one_off_kind_is_outside_spending_and_summarized_raw(db, add_row, today):
+    add_row("t-oo1", "main", "acc-main", date(2026, 3, 12), "-900.00", "Down payment", "one_off")
+    add_row("t-oo2", "main", "acc-main", date(2026, 3, 13), "100.00", "Partial return", "one_off")
+    base = {"date_from": MARCH.date_from, "date_to": MARCH.date_to}
+    spend = summarize_transactions(db, TxFilters(**base), "kind", today=today)["groups"]
+    assert "one_off" not in {g["key"] for g in spend}
+    income = summarize_transactions(db, TxFilters(**base, direction="in"), "kind", today=today)["groups"]
+    assert "one_off" not in {g["key"] for g in income}
+    g = summarize_transactions(db, TxFilters(**base, kinds=["one_off"]), "kind", today=today)["groups"][0]
+    assert (g["key"], g["total"], g["in"], g["out"], g["count"]) == ("one_off", "-800.00", "100.00", "900.00", 2)

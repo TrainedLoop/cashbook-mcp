@@ -110,16 +110,17 @@ def test_migration_backup_and_failure(tmp_path):
     shutil.copy(MIGRATIONS_DIR / "0002_v02.sql", bad_dir)
     shutil.copy(MIGRATIONS_DIR / "0003_flows.sql", bad_dir)
     shutil.copy(MIGRATIONS_DIR / "0004_category_overrides.sql", bad_dir)
-    (bad_dir / "0005_bad.sql").write_text(
+    shutil.copy(MIGRATIONS_DIR / "0005_one_off.sql", bad_dir)
+    (bad_dir / "0006_bad.sql").write_text(
         "CREATE TABLE half_done (x INTEGER);\nALTER TABLE connections DROP COLUMN nope;\n"
     )
 
     with pytest.raises(MigrationError) as exc:
         Database.open(path, KEY, migrations_dir=bad_dir)
-    assert "0005_bad.sql" in str(exc.value)
+    assert "0006_bad.sql" in str(exc.value)
     assert KEY not in str(exc.value)
 
-    assert (tmp_path / "c.duckdb.bak-4").exists()
+    assert (tmp_path / "c.duckdb.bak-5").exists()
 
     db = Database.open(path, KEY)
     try:
@@ -133,7 +134,7 @@ def test_migration_backup_and_failure(tmp_path):
     finally:
         db.close()
 
-    backup = Database.open(tmp_path / "c.duckdb.bak-4", KEY)
+    backup = Database.open(tmp_path / "c.duckdb.bak-5", KEY)
     try:
         assert backup.read().execute("SELECT alias FROM connections").fetchall() == [("main",)]
     finally:
@@ -149,15 +150,16 @@ def test_successful_later_migration(tmp_path):
     shutil.copy(MIGRATIONS_DIR / "0002_v02.sql", mdir)
     shutil.copy(MIGRATIONS_DIR / "0003_flows.sql", mdir)
     shutil.copy(MIGRATIONS_DIR / "0004_category_overrides.sql", mdir)
-    (mdir / "0005_add.sql").write_text("CREATE TABLE extra (x INTEGER);")
+    shutil.copy(MIGRATIONS_DIR / "0005_one_off.sql", mdir)
+    (mdir / "0006_add.sql").write_text("CREATE TABLE extra (x INTEGER);")
     (mdir / "notes.txt").write_text("ignored")
     db = Database.open(path, KEY, migrations_dir=mdir)
     try:
-        assert db.schema_version() == 5
+        assert db.schema_version() == 6
         assert db.read().execute("SELECT count(*) FROM extra").fetchone() == (0,)
     finally:
         db.close()
-    assert (tmp_path / "c.duckdb.bak-4").exists()
+    assert (tmp_path / "c.duckdb.bak-5").exists()
 
 
 def test_migrations_ship_in_package():
@@ -234,7 +236,7 @@ def test_v04_migration_keeps_v3_data(tmp_path):
 
     db = Database.open(path, KEY)
     try:
-        assert db.schema_version() == 4
+        assert db.schema_version() >= 4
         cur = db.read()
         assert cur.execute("SELECT alias FROM connections").fetchall() == [("main",)]
         assert cur.execute(
@@ -250,3 +252,48 @@ def test_v04_migration_keeps_v3_data(tmp_path):
     finally:
         db.close()
     assert (tmp_path / "c.duckdb.bak-3").exists()
+
+
+def test_v5_keeps_overrides_journal_and_adds_one_off_flow(tmp_path):
+    path = tmp_path / "c.duckdb"
+    v4 = tmp_path / "v4"
+    v4.mkdir()
+    for f in sorted(MIGRATIONS_DIR.glob("000[1-4]_*.sql")):
+        shutil.copy(f, v4)
+    db = Database.open(path, KEY, migrations_dir=v4)
+    assert db.schema_version() == 4
+    with db.write() as cur:
+        cur.execute(
+            "INSERT INTO connections (alias, item_id, connector_name, created_at) "
+            "VALUES ('main', 'item-1', 'Bank', now())"
+        )
+        cur.execute(
+            "INSERT INTO accounts (id, alias, item_id, type, subtype, name, balance, currency, "
+            "first_seen_at, last_seen_at) "
+            "VALUES ('a1', 'main', 'item-1', 'BANK', 'X', 'Acc', 0, 'BRL', now(), now())"
+        )
+        for tid, kind in (("t1", "purchase"), ("t2", "purchase")):
+            cur.execute(
+                "INSERT INTO transactions (id, alias, account_id, date, amount, currency, description, "
+                "kind, kind_reason, pluggy_category, first_seen_at, last_seen_at) "
+                "VALUES (?, 'main', 'a1', '2026-01-02', -5, 'BRL', 'x', ?, 'sign', 'Shopping', now(), now())",
+                [tid, kind],
+            )
+        cur.execute("INSERT INTO category_overrides VALUES ('t1', 'main', 'Housing', 'c1')")
+        cur.execute(
+            "INSERT INTO classification_changes (change_id, created_at, kind, category, note, count) "
+            "VALUES ('c1', now(), NULL, 'Housing', 'n', 1)"
+        )
+    db.close()
+
+    db = Database.open(path, KEY)
+    try:
+        assert db.schema_version() >= 5
+        cur = db.read()
+        assert cur.execute("SELECT category FROM category_overrides").fetchall() == [("Housing",)]
+        assert cur.execute("SELECT change_id FROM classification_changes").fetchall() == [("c1",)]
+        assert cur.execute(
+            "SELECT pluggy_category, flow FROM v_flows WHERE id = 't1'"
+        ).fetchone() == ("Housing", "spending")
+    finally:
+        db.close()

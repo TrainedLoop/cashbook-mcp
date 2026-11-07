@@ -40,7 +40,7 @@ _TRANSACTION_DOCS: dict[str, str] = {
     "installment_total": "Total installments of the card purchase, if in installments.",
     "purchase_date": "Original purchase date of a card installment, if known.",
     "kind": "Server classification: purchase, income, internal_transfer, "
-    "card_bill_payment, refund, investment, fee, loan or other (see notes).",
+    "card_bill_payment, refund, investment, fee, loan, other or one_off (see notes).",
     "kind_reason": "Machine-readable reason for kind, e.g. matched_card_bill:<bill_id>, "
     "counterpart_is_own_account:<alias>, investment_account (the account's purpose is "
     "investment), manual:<batch id> (set by a reclassification), paired_with:<transaction id> (the other side of a "
@@ -67,7 +67,8 @@ _FLOW_DOCS = {
     "side's connection, when known.",
     "flow": "Where the money went: income, spending, refund, from_business, to_business, "
     "from_personal, to_personal (transfers between personal and business connections, by "
-    "direction), internal, investment, card_payment, or foreign (currency is not BRL, "
+    "direction), internal, investment, card_payment, one_off (kind one_off, either "
+    "direction: reported apart, never spending or income), or foreign (currency is not BRL, "
     "counted apart). Never null. Outflows are spending, whatever the kind (even income or "
     "refund); inflows of kind purchase, fee or other are refund (they reduce spending); "
     "inflows of kind loan are internal.",
@@ -284,8 +285,16 @@ NOTES: list[str] = [
         "investment = money moved into or out of investments; "
         "fee = bank fees, interest and taxes; "
         "loan = loan or financing movement; "
-        "other = not classified. kind_reason explains each choice; override it in SQL "
-        "if you disagree."
+        "other = not classified; "
+        "one_off = set manually for a one-off large expense or an asset purchase (never assigned "
+        "automatically). "
+        "Effect on totals - outflows: purchase, fee, loan, other, income and refund count as spending; "
+        "inflows: income counts as income; refund, purchase, fee and other reduce spending (as refunds); "
+        "loan inflows are left out. internal_transfer, card_bill_payment and investment are left out, "
+        "except transfers between a personal and a business connection, which are reported apart "
+        "(from_business counts as personal income). one_off (manual only, for one-off large expenses or "
+        "asset purchases) is left out and reported apart as one_off_out / one_off_in. "
+        "kind_reason explains each choice; override it in SQL if you disagree."
     ),
     (
         "Text columns (description, counterpart_name, merchant_name, names) are third-party "

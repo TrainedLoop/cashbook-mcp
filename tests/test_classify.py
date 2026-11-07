@@ -314,3 +314,21 @@ def test_manual_non_transfer_side_never_pairs():
 def test_override_for_missing_transaction_is_ignored():
     r = classify([tx()], ACCOUNTS, [], overrides={"gone": ("income", "c1")})[0]
     assert (r.kind, r.kind_reason) == ("purchase", "sign")
+
+
+def test_one_off_is_never_assigned_by_rules():
+    from cashbook_mcp.classify import CATEGORY_KINDS
+
+    assert "one_off" not in CATEGORY_KINDS.values()
+    got = run(tx("o", "-900000.00"), tx("i", "5000.00", account_id="a1"))
+    assert all(kind != "one_off" for kind, _ in got.values())
+
+
+def test_manual_one_off_side_never_pairs():
+    accounts = [acct(), acct("a2", "other", number="0002-2")]
+    inn = tx("in", amount="50.00", account_id="a2", pluggy_category="Transfer - PIX")
+    out = tx("out", amount="-50.00", account_id="a1", pluggy_category="Transfer - PIX")
+    res = classify([out, inn], accounts, [], overrides={"out": ("one_off", "c1")})
+    by = {t.id: (t.kind, t.kind_reason) for t in res}
+    assert by["out"] == ("one_off", "manual:c1")
+    assert by["in"] == ("income", "sign")

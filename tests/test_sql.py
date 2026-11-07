@@ -2,6 +2,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from decimal import Decimal
@@ -11,6 +12,7 @@ import duckdb
 import pytest
 
 from cashbook_mcp import schema_doc
+from cashbook_mcp import sql as sql_module
 from cashbook_mcp.content import MARK_CLOSE, MARK_OPEN
 from cashbook_mcp.sql import (
     MAX_CELL_CHARS,
@@ -18,6 +20,7 @@ from cashbook_mcp.sql import (
     MAX_RESULT_BYTES,
     MAX_ROWS,
     MAX_SQL_BYTES,
+    MAX_WORKERS,
     TIMEOUT_S,
     TRUNCATED_SUFFIX,
     QueryResult,
@@ -669,3 +672,24 @@ def test_wide_result_memory_is_bounded(ncols):
     assert stats["rows"] >= 1
     assert stats["bytes"] < 5 * 1024 * 1024
     assert stats["growth_mb"] < 300, stats
+
+
+def test_busy_when_workers_are_taken(db, monkeypatch):
+    sem = threading.BoundedSemaphore(1)
+    monkeypatch.setattr(sql_module, "_workers", sem)
+    sem.acquire()
+    try:
+        with pytest.raises(SqlRejected) as exc:
+            run_query(db, "SELECT 1")
+        assert exc.value.reason == "busy"
+    finally:
+        sem.release()
+    assert run_query(db, "SELECT 1").rows == [[1]]
+
+
+def test_timed_out_worker_releases_its_slot(db):
+    for _ in range(MAX_WORKERS + 1):
+        with pytest.raises(SqlRejected) as exc:
+            run_query(db, "SELECT count(*) FROM range(10000000000) a", timeout_s=0.3)
+        assert exc.value.reason == "timeout"
+    assert run_query(db, "SELECT 1").rows == [[1]]

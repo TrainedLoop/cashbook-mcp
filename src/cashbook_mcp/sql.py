@@ -43,6 +43,10 @@ TRUNCATED_SUFFIX = "…[truncated]"
 
 # Grace period for the worker to roll back and close after an interrupt.
 _INTERRUPT_GRACE_S = 5.0
+# Query workers alive at once. A worker that ignores the interrupt keeps its
+# slot until it ends, so stuck queries cannot pile up threads without bound.
+MAX_WORKERS = 2
+_workers = threading.BoundedSemaphore(MAX_WORKERS)
 _MAX_MESSAGE_CHARS = 300
 _FETCH_BATCH = 64
 _SUBQUERY_ALIAS = "__cb_q"
@@ -425,7 +429,13 @@ def run_query(
     statement = _check(sql)
     inner = _bounded_sql(sql, statement)
 
-    cur = db.read()
+    if not _workers.acquire(blocking=False):
+        raise SqlRejected("busy", "other queries are still running; retry shortly")
+    try:
+        cur = db.read()
+    except BaseException:
+        _workers.release()
+        raise
     done = threading.Event()
     outcome: dict[str, object] = {}
 
@@ -497,6 +507,7 @@ def run_query(
             try:
                 cur.close()
             finally:
+                _workers.release()
                 done.set()
 
     worker = threading.Thread(target=work, name="cashbook-sql", daemon=True)

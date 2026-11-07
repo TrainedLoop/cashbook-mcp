@@ -93,6 +93,13 @@ def test_limits_applied(db):
     assert limit.startswith(("244.1", "256"))
 
 
+def test_spill_files_next_to_store_and_encrypted(db):
+    cur = db.read()
+    temp_dir = cur.execute("SELECT current_setting('temp_directory')").fetchone()[0]
+    assert temp_dir == str(db._path) + ".tmp"
+    assert cur.execute("SELECT current_setting('temp_file_encryption')").fetchone() == (True,)
+
+
 def test_read_cursor_sees_store_tables(db):
     cur = db.read()
     assert cur.execute("SELECT count(*) FROM v_transactions").fetchone() == (0,)

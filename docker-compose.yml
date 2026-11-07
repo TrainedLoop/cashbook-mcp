@@ -12,4 +12,19 @@ services:
       - ./data:/data
       # pluggy.json, google-oauth.json, db.key, session.key. Read-only: the server never writes here.
       - ./secrets:/secrets:ro
+    # Internet-facing: no writable root filesystem, no capabilities, no privilege
+    # escalation. DuckDB spills to /data (next to the store), not to /tmp.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     mem_limit: 512m
+    oom_score_adj: 200
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"

@@ -14,6 +14,7 @@ from .metrics import SCOPES, Scope
 
 Granularity = Literal["day", "week", "month"]
 _ZERO = Decimal("0.00")
+MAX_DAILY_POINTS = 400
 _COMPONENTS = ("bank", "investment", "card", "loan")
 
 
@@ -84,10 +85,14 @@ def net_worth(
 ) -> dict:
     where, params = _alias_filter(scope)
     start = date_from or months_ago(today, 12)
-    end = date_to or today
+    end = min(date_to or today, today)
     if start > end:
         raise ValueError("date_from must not be after date_to")
     dates = _period_ends(start, end, granularity)
+    if granularity == "day" and len(dates) > MAX_DAILY_POINTS:
+        raise ValueError(
+            f"granularity=day allows at most {MAX_DAILY_POINTS} points; narrow date_from/date_to or use week or month"
+        )
     foreign: set[str] = set()
     cur = db.read()
     try:
@@ -170,6 +175,8 @@ def net_worth(
             "net": assets - liabilities,
             **parts,
             "estimated": estimated,
+            "components": [c for c in _COMPONENTS if seen[c]],
+            "estimated_components": ["bank"] if estimated else [],
         })  # fmt: skip
 
     def starts(group: _Series) -> date | None:

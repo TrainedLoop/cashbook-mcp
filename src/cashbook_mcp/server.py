@@ -186,7 +186,8 @@ def create_mcp(
         "Start here. Balances per bank account; limit, used limit and open bill per card; bills due within "
         "days_ahead; month-to-date income, spending and net; top spending categories this month; and "
         "connections with problems and how to fix them. Adds a `business` block (month-to-date income, "
-        "spending and owner_draws) when a business connection exists; the rest is personal."
+        "spending and owner_draws) when a business connection exists; the rest is personal. `net_worth` gives the current net and change_this_month, summed only over "
+        "the change_components (bank, investment, card) with real, non-estimated values on both days; loans never count."
     ))  # fmt: skip
     async def finance_overview(days_ahead: int = 10) -> dict:
         return await respond(lambda: _finance_overview(db, today(), days_ahead))
@@ -348,10 +349,11 @@ def create_mcp(
         "are the last day of each period (day, week or month; default: last 12 months to today, monthly). "
         "Balances come from daily snapshots kept since the first sync; bank balances before an account's "
         "first snapshot are estimated from transactions (estimated=true). history_starts gives the first "
-        "snapshot date per component; loans appear only on today's point. Only BRL is summed; "
+        "snapshot date per component; loans appear only on today's point; date_to is clamped to today and "
+        "granularity=day allows at most 400 points. Only BRL is summed; "
         "`excluded_foreign` counts items in other currencies. finance_overview reports net_worth.current and "
-        "change_this_month (current net minus net on the last day of the previous month; null if no point "
-        "exists for that day)." + SCOPE_NOTE + DATES_NOTE
+        "change_this_month (bank, investment and card movement since the last day of the previous month, "
+        "only for components with real, non-estimated values on both days; loans never count; null if none)." + SCOPE_NOTE + DATES_NOTE
     ))  # fmt: skip
     async def net_worth(
         scope: Scope = "personal",

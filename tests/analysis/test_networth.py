@@ -115,9 +115,77 @@ def test_foreign_currency_counted_apart(db):
 
 
 def test_overview_net_worth_block(db):
-    assert finance_overview(db, TODAY)["net_worth"] == {"current": None, "change_this_month": None}
+    assert finance_overview(db, TODAY)["net_worth"] == {
+        "current": None, "change_this_month": None, "change_components": [],
+    }
     with db.write() as cur:
         snap(cur, "balance_snapshots", "acc-main", "main", date(2026, 2, 28), "900.00")
         snap(cur, "balance_snapshots", "acc-main", "main", TODAY, "1000.00")
     nw = finance_overview(db, TODAY)["net_worth"]
-    assert nw == {"current": "1000.00", "change_this_month": "100.00"}
+    assert nw == {"current": "1000.00", "change_this_month": "100.00", "change_components": ["bank"]}
+
+
+def _bank(cur, d, b):
+    snap(cur, "balance_snapshots", "acc-main", "main", d, b)
+
+
+def test_change_ignores_loans(db):
+    with db.write() as cur:
+        _bank(cur, date(2026, 2, 28), "900.00")
+        _bank(cur, TODAY, "1000.00")
+        cur.execute(
+            "INSERT INTO loans (id, alias, item_id, outstanding_balance, currency, first_seen_at, "
+            "last_seen_at) VALUES ('l1', 'main', 'item', 2000, 'BRL', ?, ?)",
+            [NOW, NOW],
+        )
+    nw = finance_overview(db, TODAY)["net_worth"]
+    assert nw["current"] == "-1000.00"
+    assert nw["change_this_month"] == "100.00" and nw["change_components"] == ["bank"]
+
+
+def test_change_excludes_investment_first_seen_this_month(db):
+    with db.write() as cur:
+        cur.execute(
+            "INSERT INTO investments (id, alias, item_id, type, name, balance, currency, "
+            "first_seen_at, last_seen_at) VALUES ('inv-1', 'main', 'item', 'FIXED', 'CDB', 5000, 'BRL', ?, ?)",
+            [NOW, NOW],
+        )
+        _bank(cur, date(2026, 2, 28), "900.00")
+        _bank(cur, TODAY, "1000.00")
+        snap(cur, "investment_snapshots", "inv-1", "main", date(2026, 3, 10), "5000.00")
+    nw = finance_overview(db, TODAY)["net_worth"]
+    assert nw["change_this_month"] == "100.00" and nw["change_components"] == ["bank"]
+
+
+def test_change_excludes_estimated_bank(db, add_row):
+    with db.write() as cur:
+        _bank(cur, date(2026, 3, 5), "1000.00")  # first snapshot after previous month-end
+    add_row("e1", "main", "acc-main", date(2026, 3, 3), "-20.00", "x", "purchase")
+    nw = finance_overview(db, TODAY)["net_worth"]
+    assert nw["current"] == "1000.00"
+    assert nw["change_this_month"] is None and nw["change_components"] == []
+
+
+def test_change_counts_cards_as_liabilities(db):
+    with db.write() as cur:
+        _bank(cur, date(2026, 2, 28), "900.00")
+        _bank(cur, TODAY, "900.00")
+        snap(cur, "balance_snapshots", "card-main", "main", date(2026, 2, 28), "100.00")
+        snap(cur, "balance_snapshots", "card-main", "main", TODAY, "300.00")
+    nw = finance_overview(db, TODAY)["net_worth"]
+    assert nw["change_this_month"] == "-200.00" and nw["change_components"] == ["bank", "card"]
+
+
+def test_date_to_is_clamped_to_today(db):
+    with db.write() as cur:
+        _bank(cur, TODAY, "1000.00")
+    out = net_worth(db, TODAY, date_from=date(2026, 3, 30), date_to=date(2026, 6, 30), granularity="day")
+    assert [p["date"] for p in out["points"]] == ["2026-03-30", "2026-03-31"]
+
+
+def test_daily_granularity_is_capped(db):
+    import pytest
+
+    with pytest.raises(ValueError, match="narrow"):
+        net_worth(db, TODAY, date_from=date(2025, 1, 1), granularity="day")
+    net_worth(db, TODAY, date_from=date(2025, 2, 25), granularity="day")  # 400 points

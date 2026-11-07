@@ -23,17 +23,34 @@ def _dicts(cur, sql: str, params: list | None = None) -> list[dict]:
 def _net_worth_block(db: Database, today: date) -> dict:
     """Current personal net worth and its change since the last day of the previous month.
 
-    change_this_month is null when no point exists for that day (estimated or not).
+    The change sums (today - previous month-end) over bank, investment and card, counting only
+    components with a real (not estimated) value on both days; loans never count. Null when none qualify.
     """
 
-    def net_on(day: date) -> Decimal | None:
+    def point_on(day: date) -> dict | None:
         points = net_worth(db, today, date_from=day, date_to=day, granularity="day")["points"]
-        return Decimal(points[0]["net"]) if points else None
+        return points[0] if points else None
 
-    current = net_on(today)
-    before = net_on(today.replace(day=1) - timedelta(days=1))
-    change = current - before if current is not None and before is not None else None
-    return {"current": jsonable(current), "change_this_month": jsonable(change)}
+    now = point_on(today)
+    before = point_on(today.replace(day=1) - timedelta(days=1))
+    used: list[str] = []
+    change = Decimal("0.00")
+    if now and before:
+        for name in ("bank", "investment", "card"):
+            if (
+                name in now["components"]
+                and name in before["components"]
+                and name not in now["estimated_components"]
+                and name not in before["estimated_components"]
+            ):
+                sign = -1 if name == "card" else 1
+                change += sign * (Decimal(now[name]) - Decimal(before[name]))
+                used.append(name)
+    return {
+        "current": now["net"] if now else None,
+        "change_this_month": jsonable(change) if used else None,
+        "change_components": used,
+    }
 
 
 def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:

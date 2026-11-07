@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ALIAS_HINT, ApiError, api, errorMessage, normalizeAlias, suggestAlias, type FoundItem } from "../api";
+import { ALIAS_HINT, ApiError, api, errorMessage, normalizeAlias, suggestAlias, type FoundItem, type Role } from "../api";
 
 interface Props {
   items: FoundItem[];
@@ -10,6 +10,7 @@ interface Props {
 interface Row {
   include: boolean;
   alias: string;
+  role: Role;
   added: string | null;
   error: string | null;
 }
@@ -22,7 +23,7 @@ function initialRows(items: FoundItem[]): Record<string, Row> {
   for (const item of items.filter(addable)) {
     const alias = suggestAlias(item.bank, taken);
     taken.add(alias);
-    rows[item.item_id] = { include: true, alias, added: null, error: null };
+    rows[item.item_id] = { include: true, alias, role: item.suggested_role ?? "personal", added: null, error: null };
   }
   return rows;
 }
@@ -48,7 +49,7 @@ export default function ChooseItems({ items, onDone, onCancel }: Props) {
       }
       used.add(alias);
       try {
-        await api.addConnection(alias, id);
+        await api.addConnection(alias, id, row.role);
         update(id, { added: alias, error: null });
       } catch (e) {
         update(id, { error: errorMessage(e) });
@@ -103,6 +104,19 @@ export default function ChooseItems({ items, onDone, onCancel }: Props) {
                         autoCapitalize="none"
                         spellCheck={false}
                       />
+                    </label>
+                  )}
+                  {row.include && (
+                    <label className="field">
+                      <span>Role</span>
+                      <select
+                        aria-label={`Role for ${bank}`}
+                        value={row.role}
+                        onChange={(e) => update(item.item_id, { role: e.target.value as Role })}
+                      >
+                        <option value="personal">Personal</option>
+                        <option value="business">Business</option>
+                      </select>
                     </label>
                   )}
                   {row.error && <p role="alert" className="error">{row.error}</p>}

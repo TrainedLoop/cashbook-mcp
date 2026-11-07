@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, errorMessage, type Connection } from "../api";
+import { api, errorMessage, type Connection, type Purpose, type Role } from "../api";
 import DisconnectDialog from "../components/DisconnectDialog";
 import { formatTime } from "../components/ServerFooter";
 import StatusBadge from "../components/StatusBadge";
@@ -40,6 +40,26 @@ export default function Connections({ disconnecting, onDisconnect, onConnect, on
     return () => clearTimeout(t);
   }, [anySyncing, rows, load]);
 
+  // Saves one select on change; on failure the select keeps its previous value and the error shows beside it.
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  async function save(key: string, fn: () => Promise<unknown>, apply: (c: Connection) => Connection) {
+    setFieldErrors((m) => ({ ...m, [key]: "" }));
+    try {
+      await fn();
+      setRows((rs) => rs && rs.map(apply));
+    } catch (e) {
+      setFieldErrors((m) => ({ ...m, [key]: errorMessage(e) }));
+    }
+  }
+  const saveRole = (alias: string, role: Role) =>
+    save(`role:${alias}`, () => api.setRole(alias, role), (c) => (c.alias === alias ? { ...c, role } : c));
+  const savePurpose = (accountId: string, purpose: Purpose) =>
+    save(
+      `purpose:${accountId}`,
+      () => api.setPurpose(accountId, purpose),
+      (c) => ({ ...c, accounts: c.accounts.map((a) => (a.id === accountId ? { ...a, purpose } : a)) }),
+    );
+
   async function reload(alias?: string) {
     setError(null);
     try {
@@ -69,6 +89,20 @@ export default function Connections({ disconnecting, onDisconnect, onConnect, on
               </div>
               <p className="muted">{c.bank ?? "Unknown bank"}</p>
               {c.hint && c.badge !== "ok" && c.badge !== "syncing" && <p className="hint">{c.hint}</p>}
+              <label className="field">
+                <span>Role</span>
+                <select
+                  aria-label={`Role for ${c.alias}`}
+                  value={c.role}
+                  onChange={(e) => void saveRole(c.alias, e.target.value as Role)}
+                >
+                  <option value="personal">Personal</option>
+                  <option value="business">Business</option>
+                </select>
+              </label>
+              {fieldErrors[`role:${c.alias}`] && (
+                <p role="alert" className="error">{fieldErrors[`role:${c.alias}`]}</p>
+              )}
               <dl className="facts">
                 <div><dt>Last sync</dt><dd>{formatTime(c.last_synced_at)}</dd></div>
                 <div>
@@ -82,7 +116,25 @@ export default function Connections({ disconnecting, onDisconnect, onConnect, on
               {c.accounts.length > 0 && (
                 <ul className="accounts">
                   {c.accounts.map((a) => (
-                    <li key={a.id}>{a.name}</li>
+                    <li key={a.id}>
+                      {a.name}
+                      {a.type === "BANK" && (
+                        <label className="field">
+                          <span>Account type</span>
+                          <select
+                            aria-label={`Account type for ${a.name}`}
+                            value={a.purpose ?? "regular"}
+                            onChange={(e) => void savePurpose(a.id, e.target.value as Purpose)}
+                          >
+                            <option value="regular">Regular</option>
+                            <option value="investment">Investment</option>
+                          </select>
+                        </label>
+                      )}
+                      {fieldErrors[`purpose:${a.id}`] && (
+                        <p role="alert" className="error">{fieldErrors[`purpose:${a.id}`]}</p>
+                      )}
+                    </li>
                   ))}
                 </ul>
               )}

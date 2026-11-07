@@ -409,7 +409,8 @@ def create_mcp(
         "Projected balance of the scope's bank accounts for the next `days` (1 to 90) from known commitments: "
         "open card bills, remaining installments and high or medium confidence recurring charges and income, "
         "each event with its confidence. It adds no new card spending beyond recurring charges and leaves out "
-        "company withdrawals and irregular inflows (see typical_monthly_inflow). Returns start_balance, events "
+        "company withdrawals and irregular inflows (see typical_monthly_inflow: the average monthly income net "
+        "of the recurring income already in the curve, given as recurring_income_in_curve). Returns start_balance, events "
         "(negative is money out), balance per day (per week above 31 days), lowest, negative_on, notes; "
         "by_account adds the same per bank account." + SCOPE_NOTE
     ))  # fmt: skip

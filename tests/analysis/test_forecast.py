@@ -197,8 +197,21 @@ def test_bank_recurring_and_income(fdb):
     rec = events(out, "recurring")
     assert sorted((e["amount"], e["account_id"]) for e in rec) == [("-800.00", "bank"), ("3000.00", "bank")]
     assert all("2026-04-01" <= e["date"] <= "2026-04-30" for e in rec)
-    assert out["typical_monthly_inflow"] == "3000.00"
-    assert any("typical_monthly_inflow" in n and "not" in n for n in out["notes"])
+    # The April salary is already in the curve, so the typical inflow left out of it is net of it.
+    assert out["recurring_income_in_curve"] == "3000.00"
+    assert out["typical_monthly_inflow"] == "0.00"
+    assert any("typical_monthly_inflow" in n and "net of" in n for n in out["notes"])
+
+
+def test_typical_inflow_net_of_recurring_income_per_month(fdb):
+    with fdb.write() as cur:
+        for n, d in enumerate([date(2025, 12, 5), date(2026, 1, 5), date(2026, 2, 5), date(2026, 3, 5)]):
+            tx(cur, f"sal-{n}", "bank", d, "3000.00", "Salario", "income", counterpart="Employer Ltda")
+        tx(cur, "gig", "bank", date(2026, 1, 20), "1800.00", "Freela", "income", counterpart="Client")
+    out = cash_forecast(fdb, TODAY, days=60)
+    # Two salaries fall in 60 days: one month's worth is netted out of the monthly average.
+    assert out["recurring_income_in_curve"] == "6000.00"
+    assert out["typical_monthly_inflow"] == "600.00"
 
 
 def test_card_recurring_goes_into_future_bill(fdb):
@@ -232,6 +245,7 @@ def test_nothing_scheduled_is_flat(empty):
     assert out["lowest"] == {"date": "2026-03-31", "balance": "1000.00"}
     assert out["negative_on"] is None
     assert out["typical_monthly_inflow"] == "0.00"
+    assert out["recurring_income_in_curve"] == "0.00"
 
 
 def test_days_bounds(empty):

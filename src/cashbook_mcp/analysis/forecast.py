@@ -328,11 +328,16 @@ def cash_forecast(
         notes.append("Investment-purpose bank accounts are left out of start_balance (connections: " + ", ".join(investment) + ").")
     if not banks:
         notes.append("No bank account in scope: the start balance is zero.")
-    inflow = _inflow(db, today, scope)
+    # Recurring income (a salary) is already in the curve: the typical inflow left out is net of it,
+    # per month of the window, so the two never count the same money twice.
+    in_curve = sum((e[1] for e in events if e[2] == "recurring" and e[1] > 0), _ZERO)
+    months = max(Decimal(1), Decimal(days) / 30)
+    inflow = max(_ZERO, _inflow(db, today, scope) - in_curve / months).quantize(_ZERO)
     notes.append(
-        f"typical_monthly_inflow ({inflow} BRL, the average income of the last 3 full months) is not in the "
-        "curve; company withdrawals and other irregular inflows are not either. New card spending beyond "
-        "recurring charges is not included. Only BRL is summed."
+        f"typical_monthly_inflow ({inflow} BRL) is the average income of the last 3 full months net of the "
+        f"recurring income already in the curve (recurring_income_in_curve, {in_curve} BRL over the window), "
+        "and is not in the curve; company withdrawals and other irregular inflows are not either. New card "
+        "spending beyond recurring charges is not included. Only BRL is summed."
     )
     curve = _curve(start, events, today, days)
     result = {
@@ -343,6 +348,7 @@ def cash_forecast(
         "lowest": curve["lowest"],
         "negative_on": curve["negative_on"],
         "typical_monthly_inflow": inflow,
+        "recurring_income_in_curve": in_curve,
         "notes": notes,
     }
     if by_account:

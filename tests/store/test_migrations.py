@@ -34,7 +34,7 @@ def columns(db, table):
 def test_fresh_db_is_at_latest_version(tmp_path):
     db = Database.open(tmp_path / "c.duckdb", KEY)
     try:
-        assert db.schema_version() == 1
+        assert db.schema_version() == 2
         assert db.read().execute("SELECT count(*) FROM schema_version").fetchone() == (1,)
     finally:
         db.close()
@@ -88,7 +88,7 @@ def test_reopen_is_idempotent(tmp_path):
     Database.open(path, KEY).close()
     db = Database.open(path, KEY)
     try:
-        assert db.schema_version() == 1
+        assert db.schema_version() == 2
     finally:
         db.close()
     assert not list(tmp_path.glob("*.bak-*"))
@@ -107,20 +107,21 @@ def test_migration_backup_and_failure(tmp_path):
     bad_dir = tmp_path / "migrations"
     bad_dir.mkdir()
     shutil.copy(MIGRATIONS_DIR / "0001_initial.sql", bad_dir)
-    (bad_dir / "0002_bad.sql").write_text(
+    shutil.copy(MIGRATIONS_DIR / "0002_v02.sql", bad_dir)
+    (bad_dir / "0003_bad.sql").write_text(
         "CREATE TABLE half_done (x INTEGER);\nALTER TABLE connections DROP COLUMN nope;\n"
     )
 
     with pytest.raises(MigrationError) as exc:
         Database.open(path, KEY, migrations_dir=bad_dir)
-    assert "0002_bad.sql" in str(exc.value)
+    assert "0003_bad.sql" in str(exc.value)
     assert KEY not in str(exc.value)
 
-    assert (tmp_path / "c.duckdb.bak-1").exists()
+    assert (tmp_path / "c.duckdb.bak-2").exists()
 
     db = Database.open(path, KEY)
     try:
-        assert db.schema_version() == 1
+        assert db.schema_version() == 2
         cur = db.read()
         assert cur.execute("SELECT alias FROM connections").fetchall() == [("main",)]
         tables = {r[0] for r in cur.execute(
@@ -130,7 +131,7 @@ def test_migration_backup_and_failure(tmp_path):
     finally:
         db.close()
 
-    backup = Database.open(tmp_path / "c.duckdb.bak-1", KEY)
+    backup = Database.open(tmp_path / "c.duckdb.bak-2", KEY)
     try:
         assert backup.read().execute("SELECT alias FROM connections").fetchall() == [("main",)]
     finally:
@@ -143,15 +144,16 @@ def test_successful_later_migration(tmp_path):
     mdir = tmp_path / "migrations"
     mdir.mkdir()
     shutil.copy(MIGRATIONS_DIR / "0001_initial.sql", mdir)
-    (mdir / "0002_add.sql").write_text("CREATE TABLE extra (x INTEGER);")
+    shutil.copy(MIGRATIONS_DIR / "0002_v02.sql", mdir)
+    (mdir / "0003_add.sql").write_text("CREATE TABLE extra (x INTEGER);")
     (mdir / "notes.txt").write_text("ignored")
     db = Database.open(path, KEY, migrations_dir=mdir)
     try:
-        assert db.schema_version() == 2
+        assert db.schema_version() == 3
         assert db.read().execute("SELECT count(*) FROM extra").fetchone() == (0,)
     finally:
         db.close()
-    assert (tmp_path / "c.duckdb.bak-1").exists()
+    assert (tmp_path / "c.duckdb.bak-2").exists()
 
 
 def test_migrations_ship_in_package():

@@ -225,3 +225,28 @@ def test_open_disables_extension_autoload(db):
     cur = db.read()
     for name in ("autoinstall_known_extensions", "autoload_known_extensions"):
         assert cur.execute(f"SELECT current_setting('{name}')").fetchone() == (False,)
+
+
+def test_v02_schema_present(db):
+    assert db.schema_version() >= 2
+    cur = db.read()
+    try:
+        tables = {r[0] for r in cur.execute("SELECT table_name FROM information_schema.tables").fetchall()}
+        assert {
+            "account_settings",
+            "balance_snapshots",
+            "investment_snapshots",
+            "classification_changes",
+            "classification_overrides",
+        } <= tables
+        tx_cols = {r[0] for r in cur.execute("DESCRIBE transactions").fetchall()}
+        assert {"installment_number", "installment_total", "purchase_date"} <= tx_cols
+    finally:
+        cur.close()
+    with db.write() as cur:
+        insert_connection(cur)
+        assert cur.execute("SELECT role FROM connections").fetchone() == ("personal",)
+    with pytest.raises(duckdb.ConstraintException), db.write() as cur:
+        cur.execute("UPDATE connections SET role = 'other'")
+    with pytest.raises(duckdb.ConstraintException), db.write() as cur:
+        cur.execute("INSERT INTO account_settings VALUES ('a', 'main', 'bogus')")

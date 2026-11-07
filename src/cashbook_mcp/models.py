@@ -28,6 +28,12 @@ KINDS: tuple[str, ...] = (
     "other",
 )
 
+Role = Literal["personal", "business"]
+ROLES: tuple[str, ...] = ("personal", "business")
+
+Purpose = Literal["regular", "investment"]
+PURPOSES: tuple[str, ...] = ("regular", "investment")
+
 
 @dataclass(frozen=True, slots=True)
 class Connection:
@@ -43,6 +49,7 @@ class Connection:
     consent_expires_at: datetime | None
     last_synced_at: datetime | None
     last_sync_error: str | None
+    role: Role = "personal"
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +85,9 @@ class Transaction:
     merchant_name: str | None
     pluggy_category: str | None
     bill_id: str | None
+    installment_number: int | None = None
+    installment_total: int | None = None
+    purchase_date: date | None = None
     kind: Kind = "other"
     kind_reason: str = ""
     text_suspicious: bool = False

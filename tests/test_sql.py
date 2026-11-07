@@ -62,7 +62,7 @@ def db(tmp_path):
         assert cur.execute("SELECT count(*) FROM connections").fetchone() == (1,)
     finally:
         cur.close()
-    assert database.schema_version() == 1
+    assert database.schema_version() == 2
     database.close()
 
 
@@ -191,7 +191,7 @@ def test_select_wrapped_side_effects_leave_store_unchanged(db):
     ]:
         with pytest.raises(SqlRejected):
             run_query(db, sql)
-        assert db.schema_version() == 1
+        assert db.schema_version() == 2
     # The sequence was not advanced by any of the above.
     with db.write() as cur:
         cur.execute(

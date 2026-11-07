@@ -63,3 +63,12 @@ def test_build_auth_creates_oauth_state_dir_under_fastmcp_home(tmp_path, monkeyp
     monkeypatch.setattr(fastmcp.settings, "home", home)
     build_auth(settings(), SECRETS)
     assert (home / "oauth-proxy").is_dir()
+
+
+def test_google_login_asks_for_a_refresh_token():
+    # Without prompt=consent Google issues a refresh token only on the first
+    # authorization of the client, so logins would die when the 1 h Google
+    # access token expires.
+    params = build_auth(settings(), SECRETS)._extra_authorize_params
+    assert params["access_type"] == "offline"
+    assert set(params["prompt"].split()) == {"consent", "select_account"}

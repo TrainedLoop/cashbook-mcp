@@ -7,7 +7,8 @@ from typing import Literal
 
 from cashbook_mcp.store.db import Database
 
-from .filters import BASE_CURRENCY, INTERNAL_KINDS, TxFilters, jsonable, where_clause
+from .filters import BASE_CURRENCY, TxFilters, jsonable, where_clause
+from .metrics import Scope, count_foreign, metric_exprs, metric_flows, scope_clause
 
 GroupBy = Literal["category", "merchant", "month", "week", "account", "kind"]
 
@@ -33,17 +34,6 @@ def _and(where: str, clause: str) -> str:
     return f"{where} AND {clause}" if where else f"WHERE {clause}"
 
 
-# Temporary stand-in for the dropped v_spending until the aggregations move to
-# v_flows spend_amount: BRL and foreign outflows, no internal movements.
-_SPENDING = (
-    "(SELECT * FROM v_flows WHERE amount < 0 AND flow IN ('spending', 'foreign') "
-    "AND kind NOT IN ('internal_transfer', 'card_bill_payment', 'investment'))"
-)
-
-
-def _count_foreign(cur, base: str, where: str, params: list) -> int:
-    sql = f"SELECT count(*) FROM {base} {_and(where, 'currency != ?')}"
-    return cur.execute(sql, [*params, BASE_CURRENCY]).fetchone()[0]
 
 
 def _signed(f: TxFilters) -> bool:
@@ -51,17 +41,34 @@ def _signed(f: TxFilters) -> bool:
     return bool(f.kinds) and f.direction is None
 
 
-def _aggregate(db: Database, f: TxFilters, group_by: str) -> tuple[dict[str, dict], int]:
+def _aggregate(
+    db: Database, f: TxFilters, dims: list[str], scope: Scope
+) -> tuple[dict[tuple, dict], int]:
     """Groups for f, and how many matching rows were skipped as foreign currency."""
-    # Spending semantics (outflows only, internal movements and investments
-    # excluded) unless the caller asks for inflows or specific kinds.
-    base = "v_transactions" if (f.direction == "in" or f.kinds) else _SPENDING
-    where, params = where_clause(f)
-    if base == "v_transactions" and "investment" not in (f.kinds or []):
-        # Same exclusion as cash_flow, so income figures agree.
-        where = _and(where, "kind != 'investment'")
+    exprs = ", ".join(_GROUP_EXPR[d] for d in dims)
     signed = _signed(f)
-    total = "sum(amount)" if signed else "abs(sum(amount))"
+    raw = bool(f.kinds)
+    income = f.direction == "in" and not raw
+    scoped = replace(f, scope=scope)
+    if raw:
+        # Rows of the kinds asked for, as stored: signed or by magnitude.
+        where, wparams = where_clause(scoped)
+        total = "sum(amount)" if signed else "abs(sum(amount))"
+        extra = _and(where, "currency = ?")
+        params = [*wparams, BASE_CURRENCY]
+    else:
+        # Spending (net of refunds) or income, as v_flows defines them. Internal
+        # movements are excluded by their flow, not by kind, so groups add up to
+        # cash_flow.
+        where, wparams = where_clause(replace(scoped, direction=None, exclude_internal=False))
+        if income:
+            flows = "('income', 'from_business')" if scope == "personal" else "('income')"
+            total = metric_exprs(scope)["income"]
+        else:
+            flows = "('spending', 'refund')"
+            total = "sum(spend_amount)"
+        extra = _and(where, f"flow IN {flows}")
+        params = wparams
     split = (
         ", coalesce(sum(CASE WHEN amount > 0 THEN amount END), 0), "
         "coalesce(abs(sum(CASE WHEN amount < 0 THEN amount END)), 0)"
@@ -69,19 +76,27 @@ def _aggregate(db: Database, f: TxFilters, group_by: str) -> tuple[dict[str, dic
         else ""
     )
     sql = (
-        f"SELECT {_GROUP_EXPR[group_by]} AS k, {total}, count(*), "
-        f"min(date), max(date){split} FROM {base} {_and(where, 'currency = ?')} GROUP BY 1"
+        f"SELECT {exprs}, {total}, count(*), min(date), max(date){split} "
+        f"FROM v_flows {extra} GROUP BY {', '.join(str(i + 1) for i in range(len(dims)))}"
     )
     cur = db.read()
     try:
-        fetched = cur.execute(sql, [*params, BASE_CURRENCY]).fetchall()
-        foreign = _count_foreign(cur, base, where, params)
+        fetched = cur.execute(sql, params).fetchall()
+        if raw:
+            foreign = cur.execute(
+                f"SELECT count(*) FROM v_flows {_and(where, 'currency != ?')}",
+                [*wparams, BASE_CURRENCY],
+            ).fetchone()[0]
+        else:
+            foreign = count_foreign(cur, where, wparams, outflow_only=not income)
     finally:
         cur.close()
     groups = {}
-    for k, amount, count, first, last, *rest in fetched:
+    n = len(dims)
+    for row in fetched:
+        keys, (amount, count, first, last, *rest) = tuple(row[:n]), row[n:]
         g = {
-            "key": k,
+            "key": keys[0] if n == 1 else list(keys),
             "total": amount,
             "count": count,
             "average": _average(amount, count),
@@ -90,75 +105,84 @@ def _aggregate(db: Database, f: TxFilters, group_by: str) -> tuple[dict[str, dic
         }
         if signed:
             g["in"], g["out"] = rest
-        groups[k] = g
+        groups[keys] = g
     return groups, foreign
 
 
 def summarize_transactions(
     db: Database,
     f: TxFilters,
-    group_by: GroupBy,
+    group_by: GroupBy | list[GroupBy],
     compare_previous: bool = False,
     *,
     today: date,
+    scope: Scope = "personal",
 ) -> dict:
-    if group_by not in _GROUP_EXPR:
-        raise ValueError(f"unsupported group_by: {group_by}")
+    dims = [group_by] if isinstance(group_by, str) else list(group_by)
+    if not 1 <= len(dims) <= 2:
+        raise ValueError("group_by takes one or two dimensions")
+    for d in dims:
+        if d not in _GROUP_EXPR:
+            raise ValueError(f"unsupported group_by: {d}")
+    scope_clause(scope)  # validates
     date_to = f.date_to or today
     date_from = f.date_from or (date_to - timedelta(days=29))
     current, foreign = _aggregate(
-        db, replace(f, date_from=date_from, date_to=date_to), group_by
+        db, replace(f, date_from=date_from, date_to=date_to), dims, scope
     )
     period = {"date_from": date_from.isoformat(), "date_to": date_to.isoformat()}
-    previous: dict[str, dict] = {}
+    previous: dict[tuple, dict] = {}
     if compare_previous:
         length = (date_to - date_from).days + 1
         prev_to = date_from - timedelta(days=1)
         prev_from = prev_to - timedelta(days=length - 1)
         previous, _ = _aggregate(
-            db, replace(f, date_from=prev_from, date_to=prev_to), group_by
+            db, replace(f, date_from=prev_from, date_to=prev_to), dims, scope
         )
         period["previous_date_from"] = prev_from.isoformat()
         period["previous_date_to"] = prev_to.isoformat()
-    if group_by in _PERIOD_EXPR:
-        ordered = sorted(current.values(), key=lambda g: g["key"])
+    if dims[0] in _PERIOD_EXPR:
+        ordered = sorted(current.items(), key=lambda kv: kv[0])
     else:
-        ordered = sorted(current.values(), key=lambda g: (-abs(g["total"]), g["key"]))
+        ordered = sorted(current.items(), key=lambda kv: (-abs(kv[1]["total"]), kv[0]))
+
+    window_days = (date_to - date_from).days + 1
+    months_in_window = (date_to.year * 12 + date_to.month) - (
+        date_from.year * 12 + date_from.month
+    ) + 1
+
     # Time groupings pair periods by calendar offset (computed from the key,
     # so empty periods do not shift the pairing); others match by key.
-    def previous_key_of(key: str) -> str:
-        if group_by == "month":
+    def previous_key_of(dim: str, key: str) -> str:
+        if dim == "month":
             y, m = int(key[:4]), int(key[5:7])
             idx = y * 12 + (m - 1) - months_in_window
             return f"{idx // 12:04d}-{idx % 12 + 1:02d}"
-        if group_by == "week":
+        if dim == "week":
             y, w = int(key[:4]), int(key[6:8])
             monday = date.fromisocalendar(y, w, 1) - timedelta(days=window_days)
             iso = monday.isocalendar()
             return f"{iso.year:04d}-W{iso.week:02d}"
         return key
 
-    window_days = (date_to - date_from).days + 1
-    months_in_window = (date_to.year * 12 + date_to.month) - (
-        date_from.year * 12 + date_from.month
-    ) + 1
+    has_period = any(d in _PERIOD_EXPR for d in dims)
     groups = []
-    for g in ordered:
+    for keys, g in ordered:
         out = {k: jsonable(v) for k, v in g.items()}
         if compare_previous:
-            pkey = previous_key_of(g["key"])
-            p = previous.get(pkey)
+            pkeys = tuple(previous_key_of(d, k) for d, k in zip(dims, keys, strict=True))
+            p = previous.get(pkeys)
             fields = ("total", "count", "average") + (("in", "out") if _signed(f) else ())
             block = (
                 {k: jsonable(p[k]) for k in fields}
                 if p
                 else {k: (0 if k == "count" else str(_ZERO)) for k in fields}
             )
-            if group_by in _PERIOD_EXPR:
-                block["previous_key"] = pkey
+            if has_period:
+                block["previous_key"] = pkeys[0] if len(dims) == 1 else list(pkeys)
             out["previous"] = block
         groups.append(out)
-    result = {"groups": groups, "period": period}
+    result = {"groups": groups, "period": period, "scope": scope}
     if foreign:
         result["excluded_foreign"] = foreign
     return result
@@ -172,81 +196,74 @@ def cash_flow(
     by_account: bool = False,
     *,
     today: date | None = None,
+    scope: Scope = "personal",
 ) -> dict:
     """Income and spending per period; `today` is accepted for call symmetry."""
     if granularity not in _PERIOD_EXPR:
         raise ValueError(f"unsupported granularity: {granularity}")
-    marks = ", ".join("?" * len(INTERNAL_KINDS))
+    exprs = metric_exprs(scope)
+    clause, cparams = scope_clause(scope)
     account_col = ", account_id" if by_account else ""
-    # Income is only kind='income'. Refunds are inflows that undo spending, so
-    # they lower spending (and are reported apart) instead of counting as income.
-    where = (
-        f"WHERE date >= ? AND date <= ? AND kind NOT IN ({marks}, 'investment')"
-    )
-    params = [date_from, date_to, *INTERNAL_KINDS]
+    flows = metric_flows(scope)
+    where = "WHERE date >= ? AND date <= ?" + (f" AND {clause}" if clause else "")
+    where_flows = f"{where} AND flow IN ({', '.join('?' * len(flows))})"
+    params = [date_from, date_to, *cparams]
+    selects = ", ".join(f"coalesce({e}, 0)" for e in exprs.values())
     sql = (
-        f"SELECT {_PERIOD_EXPR[granularity]} AS period{account_col}, "
-        "coalesce(sum(CASE WHEN kind = 'income' AND amount > 0 THEN amount END), 0), "
-        "coalesce(sum(CASE WHEN kind = 'refund' AND amount > 0 THEN amount END), 0), "
-        "coalesce(abs(sum(CASE WHEN amount < 0 THEN amount END)), 0) "
-        f"FROM v_transactions {where} AND currency = ? "
-        f"GROUP BY period{account_col} ORDER BY period{account_col}"
+        f"SELECT {_PERIOD_EXPR[granularity]} AS period{account_col}, {selects} "
+        f"FROM v_flows {where_flows} GROUP BY period{account_col} ORDER BY period{account_col}"
     )
     cur = db.read()
     try:
-        fetched = cur.execute(sql, [*params, BASE_CURRENCY]).fetchall()
-        foreign = _count_foreign(cur, "v_transactions", where, params)
+        fetched = cur.execute(sql, [*params, *flows]).fetchall()
+        foreign = count_foreign(cur, where, params)
     finally:
         cur.close()
+    names = list(exprs)
+    sums = dict.fromkeys(names, _ZERO)
     periods = []
-    total_in = total_refunds = total_out = _ZERO
     for row in fetched:
-        income, refunds, outflow = row[-3], row[-2], row[-1]
-        spending = outflow - refunds
-        total_in += income
-        total_refunds += refunds
-        total_out += spending
+        values = dict(zip(names, row[-len(names):], strict=True))
+        for k, v in values.items():
+            sums[k] += v
         item = {"period": row[0]}
         if by_account:
             item["account_id"] = row[1]
-        item.update(
-            income=jsonable(income),
-            refunds=jsonable(refunds),
-            spending=jsonable(spending),
-            net=jsonable(income - spending),
-        )
+        item.update(_report(values))
         periods.append(item)
     result = {
         "date_from": date_from.isoformat(),
         "date_to": date_to.isoformat(),
         "granularity": granularity,
+        "scope": scope,
         "periods": periods,
-        "totals": {
-            "income": jsonable(total_in),
-            "refunds": jsonable(total_refunds),
-            "spending": jsonable(total_out),
-            "net": jsonable(total_in - total_out),
-        },
+        "totals": _report(sums),
     }
     if foreign:
         result["excluded_foreign"] = foreign
     return result
 
 
+def _report(values: dict) -> dict:
+    """Metric values with net added, as JSON-ready strings (income first, net after spending)."""
+    out = {k: jsonable(v) for k, v in values.items() if k in ("income", "refunds", "spending")}
+    out["net"] = jsonable(values["income"] - values["spending"])
+    out.update({k: jsonable(v) for k, v in values.items() if k not in out})
+    return out
+
+
 def list_categories(
-    db: Database, date_from: date | None = None, date_to: date | None = None
+    db: Database,
+    date_from: date | None = None,
+    date_to: date | None = None,
+    scope: Scope = "personal",
 ) -> list[dict]:
-    where, params = where_clause(TxFilters(date_from=date_from, date_to=date_to))
-    sql = (
-        f"SELECT {_GROUP_EXPR['category']} AS k, count(*), abs(sum(amount)) "
-        f"FROM {_SPENDING} {_and(where, 'currency = ?')} GROUP BY 1 ORDER BY 3 DESC, 1"
-    )
-    cur = db.read()
-    try:
-        fetched = cur.execute(sql, [*params, BASE_CURRENCY]).fetchall()
-    finally:
-        cur.close()
+    """Spending per category, net of refunds; the totals add up to cash_flow spending."""
+    scope_clause(scope)  # validates
+    f = TxFilters(date_from=date_from, date_to=date_to)
+    groups, _ = _aggregate(db, f, ["category"], scope)
+    rows = sorted(groups.values(), key=lambda g: (-g["total"], g["key"]))
     return [
-        {"category": k, "count": count, "total": jsonable(total)}
-        for k, count, total in fetched
+        {"category": g["key"], "count": g["count"], "total": jsonable(g["total"])}
+        for g in rows
     ]

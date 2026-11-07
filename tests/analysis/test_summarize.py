@@ -31,7 +31,7 @@ def test_cash_flow_excludes_internal(db, today):
     res = cash_flow(db, date(2026, 3, 1), date(2026, 3, 31), today=today)
     assert res["periods"] == [
         {"period": "2026-03", "income": "5000.00", "refunds": "0.00", "spending": "408.20",
-         "net": "4591.80"}
+         "net": "4591.80", "from_business": "0.00", "to_business": "0.00"}
     ]
     assert res["totals"]["net"] == "4591.80"
 
@@ -165,6 +165,7 @@ def test_cash_flow_card_payment_and_refund(db, add_row, today):
     res = cash_flow(db, date(2026, 3, 1), date(2026, 3, 31), today=today)
     assert res["totals"] == {
         "income": "5000.00", "refunds": "20.00", "spending": "388.20", "net": "4611.80",
+        "from_business": "0.00", "to_business": "0.00",
     }  # fmt: skip
     assert res["periods"][0]["refunds"] == "20.00"
     assert res["periods"][0]["income"] == "5000.00"

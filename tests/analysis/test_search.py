@@ -164,3 +164,13 @@ def test_compact_row_is_small(db, add_row):
             "-120.50", "Supermarket purchase", "purchase", category="Groceries")  # fmt: skip
     rows = search_transactions(db, TxFilters(text="Supermarket purchase"))["rows"]
     assert len(json.dumps(rows[0])) < 300
+
+
+def test_category_overridden_flag_only_when_true(db, add_row):
+    add_row("t-ovr", "main", "acc-main", date(2026, 3, 20), "-9.00", "ACME Imóveis", "purchase", category="Other")
+    with db.write() as cur:
+        cur.execute("INSERT INTO category_overrides VALUES ('t-ovr', 'main', 'Rent', 'c1')")
+    rows = {r["id"]: r for r in search_transactions(db, TxFilters(exclude_internal=False), limit=500)["rows"]}
+    assert rows["t-ovr"]["category"] == "Rent" and rows["t-ovr"]["category_overridden"] is True
+    assert all("category_overridden" not in r for i, r in rows.items() if i != "t-ovr")
+    assert get_transactions(db, ["t-ovr"])[0]["category_overridden"] is True

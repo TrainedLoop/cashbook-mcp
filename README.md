@@ -31,7 +31,7 @@ Every response carries `data_as_of` per connection and any connection problem.
 | `net_worth`, `cash_forecast` | Net worth over time; projected cash balance for the next 30 to 90 days |
 | `find_recurring`, `recurring_changes` | Recurring-charge candidates; price increases, new, stopped and duplicate charges |
 | `review_classification` | Queue of transactions the server is unsure about, with hints |
-| `reclassify_transactions`, `undo_reclassification`, `list_reclassifications` | The one local write path: change a transaction's kind, undo a batch, list batches |
+| `reclassify_transactions`, `undo_reclassification`, `list_reclassifications` | The one local write path: change a transaction's kind and/or category, undo a batch, list batches |
 | `describe_schema`, `query_sql` | The schema, and `SELECT`/`WITH`-only SQL over it |
 
 All tools are read-only except `reclassify_transactions` and `undo_reclassification`, which change local labels only.
@@ -41,7 +41,7 @@ Prompts: `monthly_review`, `subscriptions_audit`, `upcoming_bills`, `review_clas
 ## Security model, in short
 
 - The server never changes anything at Pluggy. Its only non-GET calls are `POST /auth` and `POST /connect_token`.
-- Locally there is one write path: the assistant can set the kind of specific transactions. Every change is journaled, reversible and capped per day.
+- Locally there is one write path: the assistant can set the kind and/or category of specific transactions. Every change is journaled, reversible and capped per day.
 - Only a verified Google login listed in `ALLOWED_EMAILS` can use the connector or `/admin`.
 - `query_sql` allows one `SELECT`/`WITH` statement, parsed by DuckDB, on a locked-down reader connection: no files, network, extensions, `ATTACH` or writes. 10 s timeout, 1,000 rows.
 - Transaction text is written by third parties (anyone can send you a PIX with a message). It is cleaned, capped and wrapped in untrusted markers when suspicious, and the tool descriptions say it is data, not instructions.

@@ -141,3 +141,93 @@ def test_hint_counts_an_override_once(db, add_row):
          tax="11122233344", acct="777")
     (g,) = _groups(db)
     assert g["hint"] == {"kinds": {"internal_transfer": 3}}
+
+
+def _category(db, tx_id, category="Rent"):
+    with db.write() as cur:
+        cur.execute("INSERT INTO category_overrides VALUES (?, 'main', ?, 'c2')", [tx_id, category])
+
+
+def test_hint_counts_category_overrides_once(db, add_row):
+    _row(db, add_row, "r1", "-1500.00", "purchase", "sign", category="Business", tax="11122233344", acct="777")
+    _row(db, add_row, "r2", "-1500.00", "purchase", "sign", category="Business", tax="111.222.333-44")
+    _row(db, add_row, "r3", "-1500.00", "purchase", "sign", category="Business", acct="777")
+    for i in ("r1", "r2", "r3"):
+        _category(db, i)
+    _row(db, add_row, "new", "-80.00", "purchase", "sign", category="Transfers", counterpart="Ana",
+         tax="11122233344", acct="777")
+    (g,) = _groups(db)
+    assert g["reason"] == "unpaired_transfer"
+    assert g["hint"] == {"categories": {"Rent": 3}}
+    _override(db, "r1", "purchase")
+    (g,) = _groups(db)
+    assert g["hint"] == {"kinds": {"purchase": 1}, "categories": {"Rent": 3}}
+
+
+def test_same_payee_recategorized_appears_and_disappears(db, add_row):
+    _row(db, add_row, "old", "-1500.00", "purchase", "sign", category="Business", counterpart="ACME Imóveis",
+         tax="12.345.678/0001-95", d=date(2026, 2, 10))
+    _category(db, "old")
+    _row(db, add_row, "new", "-1500.00", "purchase", "sign", category="Business", counterpart="ACME Imóveis",
+         tax="12345678000195")
+    _row(db, add_row, "other", "-30.00", "purchase", "sign", category="Business", counterpart="Other",
+         tax="99999999999")
+    (g,) = _groups(db)
+    assert g["reason"] == "same_payee_recategorized"
+    assert [t["id"] for t in g["transactions"]] == ["new"]  # not the overridden one, nor another payee
+    assert g["hint"] == {"categories": {"Rent": 1}}
+    assert g["transactions"][0]["category"] == "Business"
+    assert [x["id"] for x in _groups(db, date_from=date(2026, 3, 1))[0]["transactions"]] == ["new"]
+    assert _groups(db, date_to=date(2026, 3, 1)) == []
+    assert _groups(db, scope="business") == []
+    _category(db, "new")
+    assert _groups(db) == []
+
+
+def test_same_payee_recategorized_by_account_number_and_kind_override(db, add_row):
+    _row(db, add_row, "old", "-1500.00", "purchase", "sign", category="Business", acct="555")
+    _category(db, "old")
+    _row(db, add_row, "new", "-1500.00", "purchase", "sign", category="Business", acct="555")
+    _override(db, "new", "purchase")  # a kind override does not settle the category
+    (g,) = _groups(db)
+    assert g["reason"] == "same_payee_recategorized" and g["transactions"][0]["id"] == "new"
+
+
+def test_recategorized_already_in_the_right_category_is_not_queued(db, add_row):
+    _row(db, add_row, "old", "-1500.00", "purchase", "sign", category="Business", tax="11122233344")
+    _category(db, "old")
+    _row(db, add_row, "new", "-1500.00", "purchase", "sign", category="Rent", tax="11122233344")
+    assert _groups(db) == []
+
+
+def test_category_override_does_not_hide_a_kind_reason(db, add_row):
+    # The reason follows the provider's category and kind, not the label the agent set.
+    _row(db, add_row, "u1", "-80.00", "purchase", "sign", category="Transfers", counterpart="Ana", tax="111")
+    _category(db, "u1", "Housing")
+    (g,) = _groups(db)
+    assert g["reason"] == "unpaired_transfer"
+    assert g["transactions"][0]["category"] == "Housing"
+
+
+def test_prompt_mentions_categories():
+    text = prompts.review_classifications()
+    assert "category" in text and "same_payee_recategorized" in text
+    assert "never apply" in text
+
+
+def test_same_payee_recategorized_ignores_the_other_direction(db, add_row):
+    _row(db, add_row, "old", "-1500.00", "purchase", "sign", category="Business", tax="11122233344")
+    _category(db, "old")
+    _row(db, add_row, "refund", "300.00", "refund", "sign", category="Business", counterpart="ACME Imóveis",
+         tax="11122233344")
+    _row(db, add_row, "new", "-1500.00", "purchase", "sign", category="Business", tax="11122233344")
+    (g,) = _groups(db)
+    assert [t["id"] for t in g["transactions"]] == ["new"]
+
+
+def test_third_party_transfers_reach_the_queue(db, add_row):
+    _row(db, add_row, "p1", "40.00", "income", "sign", category="Third party transfers", counterpart="Ana  Souza")
+    _row(db, add_row, "p2", "25.00", "income", "sign", category="Third party transfers", counterpart="ana souza")
+    (g,) = _groups(db)
+    assert g["reason"] == "unpaired_transfer"
+    assert [t["id"] for t in g["transactions"]] == ["p1", "p2"]  # grouped by normalized name

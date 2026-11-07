@@ -31,6 +31,7 @@ COLUMNS = (
     "kind",
     "kind_reason",
     "text_suspicious",
+    "category_overridden",
     "suspicion_reasons",
     "role",
     "flow",
@@ -59,6 +60,8 @@ def compact_row(row: dict) -> dict:
         out["currency"] = row["currency"]
     if row["text_suspicious"]:
         out["text_suspicious"] = True
+    if row["category_overridden"]:
+        out["category_overridden"] = True
     return out
 
 

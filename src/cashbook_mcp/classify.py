@@ -19,6 +19,7 @@ CATEGORY_KINDS: dict[str, Kind] = {
     "investments": "investment",
     "fixed income": "investment",
     "variable income": "investment",
+    "mutual funds": "investment",
     "taxes": "fee",
     "bank fees": "fee",
     "account fees": "fee",

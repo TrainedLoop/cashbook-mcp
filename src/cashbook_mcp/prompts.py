@@ -100,13 +100,19 @@ def review_classifications() -> str:
 
 Steps:
 1. Call review_classification() to get the queue: groups of transactions by counterpart, each with a
-   reason, a total and, when I changed the same counterpart before, a hint with the kinds I used.
+   reason, a total and, when I changed the same counterpart before, a hint with the kinds and the
+   categories I used. The reason same_payee_recategorized means the counterpart already has a
+   category I set on another transaction (for example the monthly rent) and this one has not.
 2. Go through the groups one at a time, largest first. For each, tell me who the counterpart is, the
    transactions (date, amount, account) and the reason it is unclear, and ask me what it really is.
    A hint is only a suggestion from my earlier changes: never apply it without my answer.
-3. Only for what I confirmed, call reclassify_transactions(ids=[...], kind=...) with the transaction ids of
-   that group and a short note. Leave anything I did not confirm or am unsure about untouched.
-4. At the end report each change_id, the kind, the number of transactions changed and what was left out.
+3. Only for what I confirmed, call reclassify_transactions(ids=[...], kind=..., category=...) with the
+   transaction ids of that group and a short note. You may propose a kind change, a category change or
+   both; a category only relabels the transaction in groupings and never changes the kind or the totals,
+   and it must come from the valid list (list_categories shows the ones in use; a bad_category error returns the full list). Leave
+   anything I did not confirm or am unsure about untouched.
+4. At the end report each change_id, the kind and/or category, the number of transactions changed and
+   what was left out.
    Any batch can be undone with undo_reclassification(change_id=...).
 
 {SAFETY}

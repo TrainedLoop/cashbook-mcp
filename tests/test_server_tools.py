@@ -472,11 +472,47 @@ async def test_reclassify_tools_and_error_shape(tmp_path):
         db.close()
 
 
+async def test_reclassify_category_tools_and_error_shapes(tmp_path):
+    db = Database.open(tmp_path / "s.duckdb", KEY)
+    _populate(db, loaded=True)
+    syncer = Syncer(db, NoNetworkClient(), history_months=12, tz=TZ, now=lambda: NOW, tool_names=ALL_TOOL_NAMES)
+    mcp = create_mcp(db=db, syncer=syncer, tz=TZ, now=lambda: NOW)
+    try:
+        out = await call(mcp, "reclassify_transactions", {"ids": ["t-shop"], "category": "rent"})
+        (change,) = out["changes"]
+        assert change["id"] == "t-shop" and change["new_category"] == "Rent" and "new_kind" not in change
+        rows = await call(mcp, "query_sql", {
+            "sql": "SELECT pluggy_category, category_overridden, kind FROM v_flows WHERE id = 't-shop'"
+        })
+        assert rows["rows"] == [["Rent", True, "purchase"]]
+        bad = await call(mcp, "reclassify_transactions", {"ids": ["t-shop"], "category": "Nope"})
+        assert bad["error"] == "bad_category" and "Rent" in bad["valid_categories"] and "message" in bad
+        empty = await call(mcp, "reclassify_transactions", {"ids": ["t-shop"], "category": ""})
+        assert empty["error"] == "bad_category"
+        nothing = await call(mcp, "reclassify_transactions", {"ids": ["t-shop"]})
+        assert nothing["error"] == "nothing_to_change"
+        listed = await call(mcp, "list_reclassifications")
+        assert listed["changes"][0]["category"] == "Rent" and listed["changes"][0]["kind"] is None
+        assert (await call(mcp, "undo_reclassification", {"change_id": out["change_id"]}))["reverted"] == 1
+    finally:
+        db.close()
+
+
+async def test_reclassify_schema_has_optional_kind_and_category(server):
+    async with Client(server) as c:
+        tool = next(t for t in await c.list_tools() if t.name == "reclassify_transactions")
+    props = tool.input_schema["properties"]
+    assert list(props) == ["ids", "kind", "category", "note"]
+    assert tool.input_schema["required"] == ["ids"]
+    assert "category" in tool.description and "never the kind" in tool.description
+    assert "bad_category" in tool.description
+
+
 async def test_reclassify_schema_lists_kinds(server):
     async with Client(server) as c:
         tool = next(t for t in await c.list_tools() if t.name == "reclassify_transactions")
     schema = tool.input_schema["properties"]["kind"]
-    assert set(schema["enum"]) == set(KINDS)
+    assert set(next(o for o in schema["anyOf"] if "enum" in o)["enum"]) == set(KINDS)
 
 
 async def test_summarize_schema_exposes_group_by_values(server):

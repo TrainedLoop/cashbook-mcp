@@ -10,6 +10,7 @@ function reply(status: number, body: unknown) {
 
 const connection: Connection = {
   alias: "nubank",
+  role: "personal",
   bank: "Meu Banco",
   status: "UPDATED",
   execution_status: "SUCCESS",

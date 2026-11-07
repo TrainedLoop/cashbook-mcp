@@ -22,6 +22,8 @@ MUTATIONS = [
     ("POST", "/admin/api/connections/main/reload", None),
     ("POST", "/admin/api/reload", None),
     ("DELETE", "/admin/api/connections/main", None),
+    ("PATCH", "/admin/api/connections/main", {"role": "business"}),
+    ("PATCH", "/admin/api/accounts/acc-main", {"purpose": "investment"}),
 ]
 
 
@@ -239,6 +241,95 @@ def test_add_connection_pluggy_failure_is_generic(env):
     assert "secrets" not in resp.text
 
 
+def test_add_connection_passes_a_valid_role(env):
+    env.login()
+    resp = env.send("POST", "/admin/api/connections", {"alias": "new", "item_id": "item-9", "role": "business"})
+    assert resp.status_code == 201
+    assert env.syncer.roles["new"] == "business"
+
+
+def test_add_connection_without_role_lets_the_syncer_suggest(env):
+    env.login()
+    env.send("POST", "/admin/api/connections", {"alias": "new", "item_id": "item-9"})
+    assert env.syncer.roles["new"] is None
+
+
+@pytest.mark.parametrize("role", ["owner", "", None, 3, ["personal"]])
+def test_add_connection_refuses_a_bad_role_before_pluggy(env, role):
+    env.login()
+    resp = env.send("POST", "/admin/api/connections", {"alias": "new", "item_id": "item-9", "role": role})
+    assert resp.status_code == 422
+    assert resp.json() == {"error": "role_invalid"}
+    assert env.syncer.calls == []
+
+
+# --- role and purpose -----------------------------------------------------------------------
+
+
+def test_set_role(env):
+    env.login()
+    resp = env.send("PATCH", "/admin/api/connections/main", {"role": "business"})
+    assert resp.status_code == 200
+    assert resp.json() == {"alias": "main", "role": "business"}
+    assert env.syncer.calls == [("set_role", "main", "business")]
+
+
+@pytest.mark.parametrize("body", [{"role": "owner"}, {"role": None}, {"role": 1}, {}])
+def test_set_role_bad_value_is_422(env, body):
+    env.login()
+    resp = env.send("PATCH", "/admin/api/connections/main", body)
+    assert resp.status_code == 422
+    assert resp.json() == {"error": "role_invalid"}
+    assert env.syncer.calls == []
+
+
+def test_set_role_unknown_alias_is_404(env):
+    env.login()
+    resp = env.send("PATCH", "/admin/api/connections/nope", {"role": "business"})
+    assert resp.status_code == 404
+    assert resp.json() == {"error": "not_found"}
+    assert env.syncer.calls == []
+
+
+def test_set_role_lookup_error_from_syncer_is_404(env):
+    env.login()
+    env.syncer.errors["set_role"] = LookupError("gone")
+    resp = env.send("PATCH", "/admin/api/connections/main", {"role": "business"})
+    assert resp.status_code == 404
+
+
+def test_set_purpose(env):
+    env.login()
+    resp = env.send("PATCH", "/admin/api/accounts/acc-main", {"purpose": "investment"})
+    assert resp.status_code == 200
+    assert resp.json() == {"account_id": "acc-main", "purpose": "investment"}
+    assert env.syncer.calls == [("set_purpose", "acc-main", "investment")]
+
+
+@pytest.mark.parametrize("body", [{"purpose": "savings"}, {"purpose": None}, {"purpose": 1}, {}])
+def test_set_purpose_bad_value_is_422(env, body):
+    env.login()
+    resp = env.send("PATCH", "/admin/api/accounts/acc-main", body)
+    assert resp.status_code == 422
+    assert resp.json() == {"error": "purpose_invalid"}
+    assert env.syncer.calls == []
+
+
+def test_set_purpose_unknown_account_is_404(env):
+    env.login()
+    env.syncer.errors["set_purpose"] = LookupError("unknown account")
+    resp = env.send("PATCH", "/admin/api/accounts/missing", {"purpose": "investment"})
+    assert resp.status_code == 404
+    assert resp.json() == {"error": "not_found"}
+
+
+def test_set_purpose_malformed_account_id_is_404_without_syncer(env):
+    env.login()
+    resp = env.send("PATCH", "/admin/api/accounts/bad_id.x", {"purpose": "investment"})
+    assert resp.status_code == 404
+    assert env.syncer.calls == []
+
+
 # --- preview --------------------------------------------------------------------------------
 
 
@@ -415,6 +506,8 @@ def test_connections_list_with_badges_and_no_raw_errors(env):
     assert rows["main"]["last_synced_at"] == "2026-11-06T09:00:00+00:00"
     assert rows["main"]["history"] == {"transactions": 1, "date_from": "2026-10-01", "date_to": "2026-10-01"}
     assert rows["main"]["accounts"][0]["name"] == "Checking"
+    assert rows["main"]["role"] in ("personal", "business")
+    assert rows["main"]["accounts"][0]["purpose"] == "regular"
     assert rows["second"]["badge"] == "login error" and rows["second"]["hint"]
     assert rows["third"]["badge"] == "outdated" and rows["third"]["sync_failed"] is True
     assert rows["fourth"]["badge"] == "consent revoked"

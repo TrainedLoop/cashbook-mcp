@@ -63,6 +63,7 @@ from cashbook_mcp.admin_web.session import (
 from cashbook_mcp.analysis import listing
 from cashbook_mcp.analysis.filters import jsonable
 from cashbook_mcp.config import Secrets, Settings
+from cashbook_mcp.models import PURPOSES, ROLES
 from cashbook_mcp.pluggy.client import PluggyClient, PluggyError
 from cashbook_mcp.presenter import REVOKED
 from cashbook_mcp.store.db import Database
@@ -647,8 +648,11 @@ def admin_routes(ctx: AdminContext) -> list[Route]:
             return _error("alias_invalid", 422)
         if not isinstance(item_id, str) or not _ITEM_ID.fullmatch(item_id):
             return _error("item_unknown", 422)
+        role = body.get("role")
+        if "role" in body and role not in ROLES:  # an unhashable value is not in the tuple either
+            return _error("role_invalid", 422)
         try:
-            await ctx.syncer.add_connection(alias, item_id, load=False)
+            await ctx.syncer.add_connection(alias, item_id, role=role, load=False)
         except ValidationError as exc:
             return _error(exc.code, 422)
         except PluggyError as exc:
@@ -657,6 +661,50 @@ def admin_routes(ctx: AdminContext) -> list[Route]:
         log.info("admin connection added alias=%s", alias)
         reloads.start(alias, partial(ctx.syncer.load, alias))
         return _json({"alias": alias, "started": True}, 201)
+
+    async def set_role(request: Request) -> Response:
+        s = checked_mutation(request, ctx)
+        if isinstance(s, Response):
+            return s
+        body = await _json_body(request)
+        if isinstance(body, Response):
+            return body
+        alias = await known_alias(request)
+        if alias is None:
+            return _error("not_found", 404)
+        role = body.get("role")
+        if role not in ROLES:
+            return _error("role_invalid", 422)
+        try:
+            await asyncio.to_thread(ctx.syncer.set_role, alias, role)
+        except ValidationError as exc:
+            return _error(exc.code, 422)
+        except LookupError:
+            return _error("not_found", 404)
+        log.info("admin role set alias=%s role=%s", alias, role)
+        return _json({"alias": alias, "role": role})
+
+    async def set_purpose(request: Request) -> Response:
+        s = checked_mutation(request, ctx)
+        if isinstance(s, Response):
+            return s
+        body = await _json_body(request)
+        if isinstance(body, Response):
+            return body
+        account_id = request.path_params.get("account_id", "")
+        if not _ITEM_ID.fullmatch(account_id):
+            return _error("not_found", 404)
+        purpose = body.get("purpose")
+        if purpose not in PURPOSES:
+            return _error("purpose_invalid", 422)
+        try:
+            await asyncio.to_thread(ctx.syncer.set_purpose, account_id, purpose)
+        except ValidationError as exc:
+            return _error(exc.code, 422)
+        except LookupError:
+            return _error("not_found", 404)
+        log.info("admin purpose set account=%s purpose=%s", account_id, purpose)
+        return _json({"account_id": account_id, "purpose": purpose})
 
     async def reload_one(request: Request) -> Response:
         s = checked_mutation(request, ctx)
@@ -709,6 +757,8 @@ def admin_routes(ctx: AdminContext) -> list[Route]:
         route("/admin/api/connections/{alias}/reload", reload_one, "POST"),
         route("/admin/api/connections/{alias}/disconnect-impact", disconnect_impact, "GET"),
         route("/admin/api/connections/{alias}", disconnect, "DELETE"),
+        route("/admin/api/connections/{alias}", set_role, "PATCH"),
+        route("/admin/api/accounts/{account_id}", set_purpose, "PATCH"),
         route("/admin/api/server", server_info, "GET"),
         route("/admin", spa.index, "GET"),
         route("/admin/assets/{file:path}", spa.asset, "GET"),

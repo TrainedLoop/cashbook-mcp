@@ -567,16 +567,18 @@ async def test_disconnect_deletes_snapshots_settings_and_overrides(syncer, fake,
     syncer.set_purpose("item-b-bank", "investment")
     with db.write() as cur:
         cur.execute(
-            "INSERT INTO classification_changes VALUES ('c1', TIMESTAMP '2026-11-06 10:00:00', "
-            "'expense', NULL, 2, NULL)"
+            "INSERT INTO classification_changes (change_id, created_at, kind, note, count) "
+            "VALUES ('c1', TIMESTAMP '2026-11-06 10:00:00', 'expense', NULL, 2)"
         )
         cur.execute("INSERT INTO classification_overrides VALUES ('t-a', 'a', 'expense', 'c1')")
         cur.execute("INSERT INTO classification_overrides VALUES ('t-b', 'b', 'expense', 'c1')")
+        cur.execute("INSERT INTO category_overrides VALUES ('t-a', 'a', 'Rent', 'c1')")
+        cur.execute("INSERT INTO category_overrides VALUES ('t-b', 'b', 'Rent', 'c1')")
 
     await syncer.disconnect("a")
 
     for table in ("balance_snapshots", "investment_snapshots", "account_settings",
-                  "classification_overrides"):
+                  "classification_overrides", "category_overrides"):
         assert rows(db, f"SELECT count(*) FROM {table} WHERE alias = 'a'") == [(0,)], table
         assert rows(db, f"SELECT count(*) FROM {table} WHERE alias = 'b'")[0][0] >= 1, table
     assert rows(db, "SELECT count(*) FROM classification_changes") == [(1,)]

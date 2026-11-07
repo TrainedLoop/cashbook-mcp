@@ -34,7 +34,7 @@ def columns(db, table):
 def test_fresh_db_is_at_latest_version(tmp_path):
     db = Database.open(tmp_path / "c.duckdb", KEY)
     try:
-        assert db.schema_version() >= 3
+        assert db.schema_version() >= 4
         assert db.read().execute("SELECT count(*) FROM schema_version").fetchone() == (1,)
     finally:
         db.close()
@@ -109,20 +109,21 @@ def test_migration_backup_and_failure(tmp_path):
     shutil.copy(MIGRATIONS_DIR / "0001_initial.sql", bad_dir)
     shutil.copy(MIGRATIONS_DIR / "0002_v02.sql", bad_dir)
     shutil.copy(MIGRATIONS_DIR / "0003_flows.sql", bad_dir)
-    (bad_dir / "0004_bad.sql").write_text(
+    shutil.copy(MIGRATIONS_DIR / "0004_category_overrides.sql", bad_dir)
+    (bad_dir / "0005_bad.sql").write_text(
         "CREATE TABLE half_done (x INTEGER);\nALTER TABLE connections DROP COLUMN nope;\n"
     )
 
     with pytest.raises(MigrationError) as exc:
         Database.open(path, KEY, migrations_dir=bad_dir)
-    assert "0004_bad.sql" in str(exc.value)
+    assert "0005_bad.sql" in str(exc.value)
     assert KEY not in str(exc.value)
 
-    assert (tmp_path / "c.duckdb.bak-3").exists()
+    assert (tmp_path / "c.duckdb.bak-4").exists()
 
     db = Database.open(path, KEY)
     try:
-        assert db.schema_version() >= 3
+        assert db.schema_version() >= 4
         cur = db.read()
         assert cur.execute("SELECT alias FROM connections").fetchall() == [("main",)]
         tables = {r[0] for r in cur.execute(
@@ -132,7 +133,7 @@ def test_migration_backup_and_failure(tmp_path):
     finally:
         db.close()
 
-    backup = Database.open(tmp_path / "c.duckdb.bak-3", KEY)
+    backup = Database.open(tmp_path / "c.duckdb.bak-4", KEY)
     try:
         assert backup.read().execute("SELECT alias FROM connections").fetchall() == [("main",)]
     finally:
@@ -147,15 +148,16 @@ def test_successful_later_migration(tmp_path):
     shutil.copy(MIGRATIONS_DIR / "0001_initial.sql", mdir)
     shutil.copy(MIGRATIONS_DIR / "0002_v02.sql", mdir)
     shutil.copy(MIGRATIONS_DIR / "0003_flows.sql", mdir)
-    (mdir / "0004_add.sql").write_text("CREATE TABLE extra (x INTEGER);")
+    shutil.copy(MIGRATIONS_DIR / "0004_category_overrides.sql", mdir)
+    (mdir / "0005_add.sql").write_text("CREATE TABLE extra (x INTEGER);")
     (mdir / "notes.txt").write_text("ignored")
     db = Database.open(path, KEY, migrations_dir=mdir)
     try:
-        assert db.schema_version() == 4
+        assert db.schema_version() == 5
         assert db.read().execute("SELECT count(*) FROM extra").fetchone() == (0,)
     finally:
         db.close()
-    assert (tmp_path / "c.duckdb.bak-3").exists()
+    assert (tmp_path / "c.duckdb.bak-4").exists()
 
 
 def test_migrations_ship_in_package():
@@ -209,3 +211,42 @@ def test_v02_migration_wipes_v01_data(tmp_path):
     finally:
         db.close()
     assert (tmp_path / "c.duckdb.bak-1").exists()
+
+
+def test_v04_migration_keeps_v3_data(tmp_path):
+    path = tmp_path / "c.duckdb"
+    v3_dir = tmp_path / "v3"
+    v3_dir.mkdir()
+    for name in ("0001_initial.sql", "0002_v02.sql", "0003_flows.sql"):
+        shutil.copy(MIGRATIONS_DIR / name, v3_dir)
+    db = Database.open(path, KEY, migrations_dir=v3_dir)
+    assert db.schema_version() == 3
+    with db.write() as cur:
+        cur.execute(
+            "INSERT INTO connections (alias, item_id, connector_name, created_at) "
+            "VALUES ('main', 'item-1', 'Bank', now())"
+        )
+        cur.execute(
+            "INSERT INTO classification_changes (change_id, created_at, kind, note, count) "
+            "VALUES ('c1', now(), 'refund', 'old', 2)"
+        )
+    db.close()
+
+    db = Database.open(path, KEY)
+    try:
+        assert db.schema_version() == 4
+        cur = db.read()
+        assert cur.execute("SELECT alias FROM connections").fetchall() == [("main",)]
+        assert cur.execute(
+            "SELECT change_id, kind, category, note, count FROM classification_changes"
+        ).fetchall() == [("c1", "refund", None, "old", 2)]
+        cur.execute(
+            "INSERT INTO classification_changes (change_id, created_at, category, count) "
+            "VALUES ('c2', now(), 'Rent', 1)"
+        )  # kind is nullable now
+        assert cur.execute("SELECT count(*) FROM category_overrides").fetchone() == (0,)
+        cols = {r[0] for r in cur.execute("DESCRIBE v_flows").fetchall()}
+        assert {"pluggy_category", "pluggy_category_original", "category_overridden"} <= cols
+    finally:
+        db.close()
+    assert (tmp_path / "c.duckdb.bak-3").exists()

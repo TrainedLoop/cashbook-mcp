@@ -56,6 +56,7 @@ _ALIAS_TABLES = (
     "investment_snapshots",
     "account_settings",
     "classification_overrides",  # the classification_changes journal stays
+    "category_overrides",
 )
 # Columns that the merge never overwrites on conflict; classification owns them.
 _KEEP_ON_CONFLICT = {"id", "kind", "kind_reason"}

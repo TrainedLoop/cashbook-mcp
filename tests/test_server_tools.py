@@ -106,9 +106,16 @@ async def test_tools_read_only_annotations(server):
     async with Client(server) as c:
         tools = await c.list_tools()
     assert {t.name for t in tools} == ALL_TOOL_NAMES
-    assert len(ALL_TOOL_NAMES) == 16
+    assert len(ALL_TOOL_NAMES) == 19
+    writers = {"reclassify_transactions", "undo_reclassification"}
     for t in tools:
-        assert t.annotations is not None and t.annotations.read_only_hint is True, t.name
+        assert t.annotations is not None, t.name
+        if t.name in writers:
+            a = t.annotations
+            assert (a.read_only_hint, a.destructive_hint, a.idempotent_hint, a.open_world_hint) == (
+                False, False, True, False), t.name
+        else:
+            assert t.annotations.read_only_hint is True, t.name
 
 
 async def test_loading_state(tmp_path):
@@ -168,11 +175,17 @@ async def test_every_tool_answers_with_connection_context(server):
         ("find_recurring", {"months": 6}),
         ("describe_schema", {}),
         ("query_sql", {"sql": "SELECT count(*) AS n FROM v_transactions"}),
+        ("list_reclassifications", {}),
+        ("reclassify_transactions", {"ids": ["t-shop"], "kind": "refund"}),
+        ("undo_reclassification", {"change_id": "{change_id}"}),
     ]
     assert {n for n, _ in calls} == ALL_TOOL_NAMES
     async with Client(server) as c:
+        change_id = None
         for name, args in calls:
+            args = {k: (change_id if v == "{change_id}" else v) for k, v in args.items()}
             out = (await c.call_tool(name, args)).structured_content
+            change_id = out.get("change_id", change_id)
             json.dumps(out, allow_nan=False)
             assert "error" not in out, (name, out)
             assert out["data_as_of"]["main"] == "2026-03-31T09:00:00+00:00", name
@@ -416,3 +429,27 @@ async def test_describe_schema_lists_flows_not_spending(server):
     assert "v_flows" in names and "v_spending" not in names
     assert "account_settings" in names
     assert any("v_flows" in n and "totals" in n for n in out["notes"])
+
+
+async def test_reclassify_tools_and_error_shape(tmp_path):
+    db = Database.open(tmp_path / "s.duckdb", KEY)
+    _populate(db, loaded=True)
+    syncer = Syncer(db, NoNetworkClient(), history_months=12, tz=TZ, now=lambda: NOW, tool_names=ALL_TOOL_NAMES)
+    mcp = create_mcp(db=db, syncer=syncer, tz=TZ, now=lambda: NOW, max_reclassify_per_day=1)
+    try:
+        out = await call(mcp, "reclassify_transactions", {"ids": ["t-shop"], "kind": "refund", "note": "n"})
+        assert out["count"] == 1 and out["changes"] == [{"id": "t-shop", "old_kind": "purchase", "new_kind": "refund"}]
+        rows = await call(mcp, "query_sql", {"sql": "SELECT kind FROM v_transactions WHERE id = 't-shop'"})
+        assert rows["rows"] == [["refund"]]
+        capped = await call(mcp, "reclassify_transactions", {"ids": ["t-evil"], "kind": "refund"})
+        assert capped["error"] == "daily_cap" and capped["remaining"] == 0 and "message" in capped
+        bad = await call(mcp, "reclassify_transactions", {"ids": ["nope"], "kind": "refund"})
+        assert bad["error"] == "unknown_ids" and bad["unknown_ids"] == ["nope"]
+        listed = await call(mcp, "list_reclassifications")
+        assert [c["change_id"] for c in listed["changes"]] == [out["change_id"]]
+        undone = await call(mcp, "undo_reclassification", {"change_id": out["change_id"]})
+        assert undone["reverted"] == 1
+        again = await call(mcp, "undo_reclassification", {"change_id": out["change_id"]})
+        assert again["error"] == "already_undone"
+    finally:
+        db.close()

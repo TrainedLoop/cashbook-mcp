@@ -41,6 +41,7 @@ from cashbook_mcp.pluggy.client import PluggyClient
 from cashbook_mcp.presenter import present
 from cashbook_mcp.sql import SqlRejected, run_query
 from cashbook_mcp.sql import describe_schema as _describe_schema
+from cashbook_mcp.store import reclassify as _reclassify
 from cashbook_mcp.store.db import Database, DatabaseOpenError, MigrationError
 from cashbook_mcp.store.scheduler import Scheduler
 from cashbook_mcp.store.sync import Syncer
@@ -51,9 +52,11 @@ ALL_TOOL_NAMES = frozenset({
     "finance_overview", "list_connections", "list_accounts", "search_transactions", "get_transactions",
     "list_bills", "list_investments", "get_investment_transactions", "list_loans", "list_categories",
     "summarize_transactions", "cash_flow", "net_worth", "find_recurring", "describe_schema", "query_sql",
+    "reclassify_transactions", "undo_reclassification", "list_reclassifications",
 })  # fmt: skip
 
 READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
+WRITE = {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
 LOADING = {"status": "loading", "message": "First data load in progress; retry in a minute."}
 SQL_ERROR_PREFIX = "DuckDB said (may quote stored third-party text): "
 
@@ -134,6 +137,7 @@ def create_mcp(
     syncer: Syncer,
     tz: ZoneInfo,
     now: Callable[[], datetime],
+    max_reclassify_per_day: int = 1000,
     scheduler: Scheduler | None = None,
     auth: AuthProvider | None = None,
     cleanup: Callable[[], Awaitable[None]] | None = None,
@@ -408,6 +412,49 @@ def create_mcp(
 
         return await respond(work)
 
+    # -- reclassification (the only write path) -----------------------------
+
+    def rejection(e: _reclassify.ReclassifyError) -> dict:
+        return {"error": e.code, "message": str(e), **e.details}
+
+    @mcp.tool(annotations=WRITE, description=(
+        "Change the kind of up to 200 transactions (kind: one of the values in describe_schema). Changes only "
+        "the local label in this store, never the bank. Ask the owner first when unsure. Reversible with "
+        "undo_reclassification using the returned change_id. All ids must be live transactions or nothing is "
+        "changed; a daily cap applies. Returns change_id, count (ids actually changed) and old/new kinds. "
+        "A rejected call returns error and message instead."
+    ))  # fmt: skip
+    async def reclassify_transactions(ids: list[str], kind: str, note: str | None = None) -> dict:
+        def work() -> dict:
+            try:
+                return _reclassify.reclassify(
+                    db, ids, kind, note, now=now(), tz=tz, daily_cap=max_reclassify_per_day
+                )
+            except _reclassify.ReclassifyError as e:
+                return rejection(e)
+
+        return await respond(work)
+
+    @mcp.tool(annotations=WRITE, description=(
+        "Undo one reclassification batch by change_id: transactions it still labels return to automatic "
+        "classification (those a newer batch changed again keep the newer label). Returns reverted, the number "
+        "of transactions affected. A rejected call returns error and message instead."
+    ))  # fmt: skip
+    async def undo_reclassification(change_id: str) -> dict:
+        def work() -> dict:
+            try:
+                return _reclassify.undo(db, change_id, now=now())
+            except _reclassify.ReclassifyError as e:
+                return rejection(e)
+
+        return await respond(work)
+
+    @mcp.tool(annotations=READ_ONLY, description=(
+        "Recent reclassification batches, newest first: change_id, created_at, kind, note, count, undone_at."
+    ))  # fmt: skip
+    async def list_reclassifications(limit: int = 20) -> dict:
+        return await respond(lambda: {"changes": _reclassify.list_changes(db, limit)})
+
     # -- prompts and routes -------------------------------------------------
 
     mcp.prompt(name="monthly_review", description=(
@@ -465,6 +512,7 @@ def build_app(settings: Settings, secrets: Secrets) -> tuple[FastMCP, AppContext
     context = AppContext(settings, secrets, db, pluggy, syncer, scheduler)
     mcp = create_mcp(
         db=db, syncer=syncer, tz=settings.tz, now=_utc_now, scheduler=scheduler,
+        max_reclassify_per_day=settings.max_reclassify_per_day,
         auth=build_auth(settings, secrets), cleanup=pluggy.aclose,
     )  # fmt: skip
     register_admin(mcp, context)

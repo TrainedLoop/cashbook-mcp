@@ -30,6 +30,7 @@ COLUMNS = (
     "bill_id",
     "kind",
     "kind_reason",
+    "payment_method",
     "text_suspicious",
     "category_overridden",
     "suspicion_reasons",
@@ -58,6 +59,8 @@ def compact_row(row: dict) -> dict:
             out[key] = row[src]
     if row["currency"] != "BRL":
         out["currency"] = row["currency"]
+    if row["payment_method"] not in (None, "OTHER"):
+        out["payment_method"] = row["payment_method"]
     if row["text_suspicious"]:
         out["text_suspicious"] = True
     if row["category_overridden"]:

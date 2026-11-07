@@ -174,3 +174,35 @@ def test_category_overridden_flag_only_when_true(db, add_row):
     assert rows["t-ovr"]["category"] == "Rent" and rows["t-ovr"]["category_overridden"] is True
     assert all("category_overridden" not in r for i, r in rows.items() if i != "t-ovr")
     assert get_transactions(db, ["t-ovr"])[0]["category_overridden"] is True
+
+
+def _set_method(db, tx_id, method):
+    with db.write() as cur:
+        cur.execute("UPDATE transactions SET payment_method = ? WHERE id = ?", [method, tx_id])
+
+
+def test_compact_row_shows_payment_method_unless_null_or_other(db):
+    _set_method(db, "t-pix-out", "PIX")
+    _set_method(db, "t-salary", "OTHER")
+    f = TxFilters(exclude_internal=False)
+    rows = {r["id"]: r for r in search_transactions(db, f, limit=200)["rows"]}
+    assert rows["t-pix-out"]["payment_method"] == "PIX"
+    assert "payment_method" not in rows["t-salary"]
+    assert "payment_method" not in rows["t-usd"]  # null
+    # full rows always carry it
+    assert get_transactions(db, ["t-salary"])[0]["payment_method"] == "OTHER"
+    assert get_transactions(db, ["t-usd"])[0]["payment_method"] is None
+
+
+def test_payment_methods_filter_is_case_insensitive_and_bound(db):
+    _set_method(db, "t-pix-out", "PIX")
+    _set_method(db, "t-pix-in", "PIX")
+    _set_method(db, "t-bill-pay", "BOLETO")
+    ids = lambda f: {r["id"] for r in search_transactions(db, f, limit=200)["rows"]}
+    assert ids(TxFilters(payment_methods=["pix"], exclude_internal=False)) == {"t-pix-out", "t-pix-in"}
+    assert ids(TxFilters(payment_methods=["Boleto", "pix"], exclude_internal=False)) == {
+        "t-pix-out", "t-pix-in", "t-bill-pay",
+    }  # fmt: skip
+    assert ids(TxFilters(payment_methods=["x' OR '1'='1"], exclude_internal=False)) == set()
+    where, params = where_clause(TxFilters(payment_methods=["pix"]))
+    assert "pix" not in where.lower().replace("payment_method", "") and "PIX" in params

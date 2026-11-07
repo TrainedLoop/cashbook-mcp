@@ -228,9 +228,10 @@ def create_mcp(
         return await respond(lambda: {"accounts": listing.list_accounts(db, alias)})
 
     @mcp.tool(annotations=READ_ONLY, description=(
-        "Search transactions, newest first, as compact rows (id, date, amount, alias, description, kind, flow; category, merchant_name, counterpart_name, non-BRL currency and text_suspicious only when set). Use get_transactions for full rows. Filters: "
+        "Search transactions, newest first, as compact rows (id, date, amount, alias, description, kind, flow; category, merchant_name, counterpart_name, non-BRL currency, payment_method other than OTHER, and text_suspicious only when set). Use get_transactions for full rows. Filters: "
         "date range, aliases, account_ids, text (description, merchant or counterpart), categories, kinds, "
-        "min/max absolute amount, direction ('in' or 'out'). Internal transfers and "
+        "min/max absolute amount, direction ('in' or 'out'), payment_methods (e.g. PIX, TED, BOLETO; case-insensitive). "
+        "Boleto payments carry the beneficiary's CNPJ/name in the counterpart fields; the barcode is not provided by the data source. Internal transfers and "
         "card bill payments are excluded unless exclude_internal=false. Without scope, all connections are "
         "searched; scope narrows to personal, business or consolidated. Pages of `limit` rows (default 50, max 200; a larger limit is clamped and the response carries limit_clamped); "
         "pass next_cursor back as cursor for the next page." + DATES_NOTE + UNTRUSTED_NOTE
@@ -250,10 +251,12 @@ def create_mcp(
         scope: Scope | None = None,
         limit: int = 50,
         cursor: str | None = None,
+        payment_methods: list[str] | None = None,
     ) -> dict:
         f = TxFilters(
             date_from, date_to, aliases, account_ids, categories, kinds, text,
             _decimal(min_amount), _decimal(max_amount), direction, exclude_internal, scope,
+            payment_methods,
         )  # fmt: skip
 
         def work() -> dict:

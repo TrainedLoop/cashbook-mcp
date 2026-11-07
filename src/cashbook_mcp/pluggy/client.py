@@ -169,8 +169,15 @@ class PluggyClient:
         return rows
 
     def _next_page(self, nxt: str, query: dict) -> tuple[str, dict | None]:
-        """Resolve a /v2/transactions `next`: a same-host path/URL, or a bare cursor."""
+        """Resolve a /v2/transactions `next`: a query string (what Pluggy sends), a same-host
+        path/URL, or a bare cursor. From a query string only `after` is taken; the rest of the
+        query stays ours."""
         base = self._http.base_url
+        if nxt.startswith("?"):
+            after = httpx.QueryParams(nxt[1:]).get("after")
+            if not after:
+                raise PluggyError("Pluggy returned a transactions `next` without `after`")
+            return "/v2/transactions", {**query, "after": after}
         if nxt.startswith("/") and not nxt.startswith("//"):
             return nxt, None  # a same-host path that already carries its query
         if "://" in nxt or nxt.startswith("//"):

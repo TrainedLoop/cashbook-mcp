@@ -88,7 +88,7 @@ def _aggregate(
                 [*wparams, BASE_CURRENCY],
             ).fetchone()[0]
         else:
-            foreign = count_foreign(cur, where, wparams, outflow_only=not income)
+            foreign = count_foreign(cur, where, wparams, side="in" if income else "out")
     finally:
         cur.close()
     groups = {}

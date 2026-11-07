@@ -73,6 +73,10 @@ def scoped(db):
     add(db, "from_biz", "pa", "200.00", "internal_transfer",
         reason="counterpart_is_owner_tax_id", tax=CNPJ)
     add(db, "groc", "pa", "-80.00", "purchase", category="Groceries")
+    # Owner contribution: personal account pays the business card.
+    add(db, "contrib", "pa", "-90.00", "card_bill_payment",
+        reason="counterpart_is_own_account:biz")
+    add(db, "contrib_in", "ba", "90.00", "card_bill_payment", reason="paired_with:contrib")
     return db
 
 
@@ -81,14 +85,14 @@ def test_scope_totals(scoped):
     assert personal == {
         "income": Decimal("200.00"), "refunds": Decimal("0.00"),
         "spending": Decimal("80.00"), "net": Decimal("120.00"),
-        "from_business": Decimal("200.00"), "to_business": Decimal("0.00"),
+        "from_business": Decimal("200.00"), "to_business": Decimal("90.00"),
         "excluded_foreign": 0,
     }
     business = totals(scoped, *MARCH, "business")
     assert business == {
         "income": Decimal("1000.00"), "refunds": Decimal("0.00"),
         "spending": Decimal("150.00"), "net": Decimal("850.00"),
-        "owner_draws": Decimal("200.00"), "owner_contributions": Decimal("0.00"),
+        "owner_draws": Decimal("200.00"), "owner_contributions": Decimal("90.00"),
         "excluded_foreign": 0,
     }
     cons = totals(scoped, *MARCH, "consolidated")
@@ -169,7 +173,8 @@ def test_cash_flow_carries_apart_keys(scoped):
     assert res["scope"] == "business"
     assert res["periods"][0]["owner_draws"] == "200.00"
     assert res["totals"]["owner_draws"] == "200.00"
-    assert res["totals"]["owner_contributions"] == "0.00"
+    assert res["totals"]["owner_contributions"] == "90.00"
+    assert res["totals"]["income"] == "1000.00"  # the contribution is not income
     res = cash_flow(scoped, *MARCH)
     assert res["periods"][0]["from_business"] == "200.00"
     assert res["totals"]["income"] == "200.00"
@@ -180,3 +185,28 @@ def test_filters_honor_scope():
 
     assert where_clause(TxFilters(scope="business", exclude_internal=False))[0] == "WHERE role = ?"
     assert where_clause(TxFilters(scope="consolidated", exclude_internal=False)) == ("", [])
+
+
+def test_excluded_foreign_counts_only_the_requested_side(db):
+    def foreign(tid, amount, kind):
+        with db.write() as cur:
+            cur.execute(
+                "INSERT INTO transactions (id, alias, account_id, date, amount, currency, "
+                "description, kind, kind_reason, first_seen_at, last_seen_at) "
+                "VALUES (?, 'pers', 'pa', DATE '2026-03-10', ?, 'USD', 'x', ?, 'sign', "
+                "now(), now())",
+                [tid, Decimal(amount), kind],
+            )
+
+    add(db, "pay", "pa", "100.00", "income")
+    foreign("fp", "-9.00", "purchase")
+    f = TxFilters(date_from=MARCH[0], date_to=MARCH[1], direction="in")
+    res = summarize_transactions(db, f, "kind", today=TODAY)
+    assert "excluded_foreign" not in res
+    foreign("fi", "9.00", "income")
+    res = summarize_transactions(db, f, "kind", today=TODAY)
+    assert res["excluded_foreign"] == 1
+    out = summarize_transactions(
+        db, TxFilters(date_from=MARCH[0], date_to=MARCH[1]), "kind", today=TODAY
+    )
+    assert out["excluded_foreign"] == 1

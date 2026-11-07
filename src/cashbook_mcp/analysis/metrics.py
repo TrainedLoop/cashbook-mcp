@@ -63,13 +63,17 @@ def metric_flows(scope: Scope) -> tuple[str, ...]:
     return ("income", "spending", "refund", *APART_FLOWS[scope])
 
 
-def count_foreign(cur, where: str, params: list, outflow_only: bool = False) -> int:
-    """Foreign-currency rows matching `where` (scope included) left out of the sums."""
+def count_foreign(
+    cur, where: str, params: list, side: Literal["in", "out"] | None = None
+) -> int:
+    """Foreign-currency rows matching `where` (scope included) left out of the sums; `side` keeps only outflows or inflows."""
     marks = ", ".join("?" * len(_NOT_COUNTED_FOREIGN))
     joiner = f"{where} AND" if where else "WHERE"
     sql = f"SELECT count(*) FROM v_flows {joiner} flow = 'foreign' AND kind NOT IN ({marks})"
-    if outflow_only:
+    if side == "out":
         sql += " AND amount < 0"
+    elif side == "in":
+        sql += " AND amount > 0"
     return cur.execute(sql, [*params, *_NOT_COUNTED_FOREIGN]).fetchone()[0]
 
 

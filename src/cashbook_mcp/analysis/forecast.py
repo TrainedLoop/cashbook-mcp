@@ -14,6 +14,7 @@ from .recurring import find_recurring
 _ZERO = Decimal("0.00")
 _CONFIDENT = ("high", "medium")
 _WEEK = 7
+_OVERDUE_DAYS = 35
 _MAX_DAILY_DAYS = 31
 
 
@@ -42,24 +43,27 @@ def _inflow(db: Database, today: date, scope: Scope) -> Decimal:
     return (total / 3).quantize(_ZERO)
 
 
-def _scope_accounts(db: Database, scope: Scope) -> tuple[list[dict], list[dict]]:
+def _scope_accounts(db: Database, scope: Scope) -> tuple[list[dict], list[dict], list[str]]:
     clause, params = scope_clause(scope)
     where = f" AND {clause}" if clause else ""
     cur = db.read()
     try:
         rows = cur.execute(
-            "SELECT a.id, a.alias, a.name, a.type, a.balance FROM v_accounts a "
-            "JOIN connections c ON c.alias = a.alias "
-            "WHERE a.currency = 'BRL' AND coalesce((SELECT s.purpose FROM account_settings s "
-            f"WHERE s.account_id = a.id), 'regular') = 'regular'{where} ORDER BY a.alias, a.name, a.id",
+            "SELECT a.id, a.alias, a.name, a.type, a.balance, coalesce((SELECT s.purpose FROM account_settings s "
+            "WHERE s.account_id = a.id), 'regular') FROM v_accounts a "
+            f"JOIN connections c ON c.alias = a.alias WHERE a.currency = 'BRL'{where} "
+            "ORDER BY a.alias, a.name, a.id",
             params,
         ).fetchall()
     finally:
         cur.close()
-    accounts = [dict(zip(("id", "alias", "name", "type", "balance"), r, strict=True)) for r in rows]
+    accounts = [dict(zip(("id", "alias", "name", "type", "balance", "purpose"), r, strict=True)) for r in rows]
+    regular = [a for a in accounts if a["purpose"] == "regular"]
+    investment = sorted({a["alias"] for a in accounts if a["type"] == "BANK" and a["purpose"] != "regular"})
     return (
-        [a for a in accounts if a["type"] == "BANK"],
-        [a for a in accounts if a["type"] == "CREDIT"],
+        [a for a in regular if a["type"] == "BANK"],
+        [a for a in regular if a["type"] == "CREDIT"],
+        investment,
     )
 
 
@@ -100,6 +104,26 @@ def _card_facts(db: Database, card_ids: list[str]) -> dict[str, dict]:
     return facts
 
 
+def _next_usual_due(due_day: int, after: date, *, strict: bool) -> date:
+    """First date on the card's usual due day after `after` (or on it, unless strict)."""
+    due = _on_day(after, due_day)
+    if due < after or (strict and due == after):
+        due = _on_day(_month_start(after, 1), due_day)
+    return due
+
+
+def _bill_due(fact: dict, d: date) -> date:
+    """Due date of the bill a purchase on `d` falls into.
+
+    With a known closing day: the bill closing on or after `d`, due `due_offset` months later. Pluggy
+    lists closed bills only (closing_date is usually empty), so otherwise: the card's next due date after `d`.
+    """
+    if fact["closing_day"] is None:
+        return _next_usual_due(fact["due_day"], d, strict=True)
+    closing_month = _month_start(d, 0 if d.day <= fact["closing_day"] else 1)
+    return _on_day(_month_start(closing_month, fact["due_offset"]), fact["due_day"])
+
+
 def _build_events(db: Database, today: date, end: date, banks: list[dict], cards: list[dict]):
     """All events in (today..end] as (date, amount, source, confidence, account_id), plus notes."""
     notes: list[str] = []
@@ -117,46 +141,69 @@ def _build_events(db: Database, today: date, end: date, banks: list[dict], cards
         unassigned.append(card_id)
         return fallback
 
+    # Projections for a card start after this date: the last unpaid bill, or the balance standing in for it.
+    cover: dict[str, date] = {}
+    balance_used = False
+
     cur = db.read()
     try:
-        # Open bills still to pay; a matched card_bill_payment row marks a bill as paid.
-        for card_id in card_ids:
-            rows = cur.execute(
+        for card in cards:
+            card_id = card["id"]
+            unpaid = cur.execute(
                 "SELECT b.due_date, b.total_amount FROM v_bills b WHERE b.account_id = ? "
-                "AND b.currency = 'BRL' AND b.due_date >= ? AND b.due_date <= ? AND b.total_amount > 0 "
+                "AND b.currency = 'BRL' AND b.due_date >= ? AND b.total_amount > 0 "
                 "AND NOT EXISTS (SELECT 1 FROM v_transactions t WHERE t.kind = 'card_bill_payment' "
-                "AND t.kind_reason = 'matched_card_bill:' || b.id)",
-                [card_id, today, end],
+                "AND t.kind_reason = 'matched_card_bill:' || b.id) ORDER BY b.due_date",
+                [card_id, today],
             ).fetchall()
-            for due, total in rows:
-                events.append((due, -total, "bill", "high", payer_of(card_id)))
+            for due, total in unpaid:
+                if due <= end:
+                    events.append((due, -total, "bill", "high", payer_of(card_id)))
+            if unpaid:
+                cover[card_id] = unpaid[-1][0]
+            elif facts[card_id]["due_day"] is not None:
+                due = _next_usual_due(facts[card_id]["due_day"], today, strict=False)
+                cover[card_id] = due
+                if due <= end and card["balance"] != 0:
+                    events.append((due, -abs(card["balance"]), "card_balance", "low", payer_of(card_id)))
+                    balance_used = True
+
+            # Unpaid bills that fell due recently: maybe paid without a match, so low confidence.
+            overdue = cur.execute(
+                "SELECT b.due_date, b.total_amount FROM v_bills b WHERE b.account_id = ? "
+                "AND b.currency = 'BRL' AND b.due_date >= ? AND b.due_date < ? AND b.total_amount > 0 "
+                "AND NOT EXISTS (SELECT 1 FROM v_transactions t WHERE t.kind = 'card_bill_payment' "
+                "AND t.kind_reason = 'matched_card_bill:' || b.id) ORDER BY b.due_date",
+                [card_id, today - timedelta(days=_OVERDUE_DAYS), today],
+            ).fetchall()
+            for due, total in overdue:
+                notes.append(f"Unpaid bill without a matched payment: {card['alias']}, due {due}, {total} BRL.")
+            if overdue:
+                events.append((today, -overdue[-1][1], "bill", "low", payer_of(card_id)))
 
         # Installments: the numbers after the highest one seen, one per later bill.
         if card_ids:
             marks = ", ".join("?" * len(card_ids))
             series = cur.execute(
-                "SELECT t.account_id, t.purchase_date, t.installment_total, abs(t.amount), "
-                "max(t.installment_number), arg_max(b.due_date, t.installment_number), max(t.date) "
+                "SELECT t.account_id, t.installment_total, max(t.installment_number), "
+                "arg_max(abs(t.amount), t.installment_number), arg_max(b.due_date, t.installment_number), "
+                "arg_max(t.date, t.installment_number) "
                 "FROM v_transactions t LEFT JOIN v_bills b ON b.id = t.bill_id "
                 f"WHERE t.account_id IN ({marks}) AND t.currency = 'BRL' "
                 "AND t.installment_total > 1 AND t.installment_number IS NOT NULL "
                 "AND t.purchase_date IS NOT NULL AND t.amount < 0 "
-                "GROUP BY t.account_id, t.purchase_date, t.installment_total, abs(t.amount)",
+                "GROUP BY t.account_id, t.purchase_date, t.installment_total",
                 card_ids,
             ).fetchall()
-            for card_id, _purchase, total, amount, last_no, last_due, last_date in series:
-                due_day = facts[card_id]["due_day"]
-                if due_day is None:
+            for card_id, total, last_no, amount, last_due, last_date in series:
+                fact = facts[card_id]
+                if fact["due_day"] is None:
                     continue
-                if last_due is not None:
-                    month = _month_start(last_due, 1)
-                else:
-                    month = _month_start(last_date, 0)
-                    if _on_day(month, due_day) <= last_date:
-                        month = _month_start(month, 1)
+                # The next installment lands in the bill after the one holding the last seen.
+                month = _month_start(last_due if last_due is not None else _bill_due(fact, last_date), 1)
                 for n in range(last_no + 1, total + 1):
-                    when = _on_day(_month_start(month, n - last_no - 1), due_day)
-                    if today <= when <= end:
+                    when = _on_day(_month_start(month, n - last_no - 1), fact["due_day"])
+                    if today <= when <= end and when > cover[card_id]:
                         events.append((when, -amount, "installment", "high", payer_of(card_id)))
 
         card_set = set(card_ids)
@@ -178,14 +225,23 @@ def _build_events(db: Database, today: date, end: date, banks: list[dict], cards
                 continue  # installment series are projected from their numbers
             sign = -1 if item["direction"] == "out" else 1
             amount = sign * Decimal(item["typical_amount"])
+            cadence = item["cadence_days"]
             when = date.fromisoformat(item["next_expected"])
+            if when < today:
+                if (today - when).days * 2 > cadence:
+                    continue  # past due by more than half a cadence: stopped
+                dates = [today]  # a little late: expect it today
+                when += timedelta(days=cadence)
+            else:
+                dates = []
             while when <= end:
-                if when >= today:
-                    if item["account_type"] == "BANK":
-                        events.append((when, amount, "recurring", item["confidence"], item["account_id"]))
-                    else:
-                        _into_bill(facts[item["account_id"]], item, when, amount, bill_sums)
-                when += timedelta(days=item["cadence_days"])
+                dates.append(when)
+                when += timedelta(days=cadence)
+            for d in dates:
+                if item["account_type"] == "BANK":
+                    events.append((d, amount, "recurring", item["confidence"], item["account_id"]))
+                else:
+                    _into_bill(facts[item["account_id"]], cover, item, d, amount, bill_sums)
     finally:
         cur.close()
 
@@ -195,10 +251,11 @@ def _build_events(db: Database, today: date, end: date, banks: list[dict], cards
     if bill_sums:
         notes.append(
             "Recurring card charges are added to that card's estimated future bill, due on the card's "
-            "most frequent due day, the same number of months after the charge's closing as the card's latest "
-            "bill; closing is taken from the card's most frequent closing day, or from the charge date "
-            "when unknown."
+            "most frequent due day: with a known closing day, the same number of months after the charge's "
+            "closing as the card's latest bill; otherwise on the next due date after the charge."
         )
+    if balance_used:
+        notes.append("Pluggy lists closed bills only; the card balance stands in for the open bill.")
     if unassigned:
         notes.append(
             "Some cards have no matched bill payment to a bank account in scope; their events are "
@@ -210,13 +267,12 @@ def _build_events(db: Database, today: date, end: date, banks: list[dict], cards
     return events, notes
 
 
-def _into_bill(fact: dict, item: dict, when: date, amount: Decimal, bill_sums: dict) -> None:
-    due_day = fact["due_day"]
-    if due_day is None:
+def _into_bill(fact: dict, cover: dict, item: dict, when: date, amount: Decimal, bill_sums: dict) -> None:
+    if fact["due_day"] is None:
         return
-    close_day = fact["closing_day"]
-    closing_month = _month_start(when, 0 if close_day is None or when.day <= close_day else 1)
-    due = _on_day(_month_start(closing_month, fact["due_offset"]), due_day)
+    due = _bill_due(fact, when)
+    if due <= cover[item["account_id"]]:
+        return  # already inside a bill that is in the curve
     key = (item["account_id"], due)
     prev = bill_sums.get(key)
     confidence = "medium" if item["confidence"] == "medium" or (prev and prev[1] == "medium") else "high"
@@ -264,10 +320,12 @@ def cash_forecast(
     if not 1 <= days <= 90:
         raise ValueError("days must be between 1 and 90")
     end = today + timedelta(days=days)
-    banks, cards = _scope_accounts(db, scope)
+    banks, cards, investment = _scope_accounts(db, scope)
     events, notes = _build_events(db, today, end, banks, cards)
     start = sum((b["balance"] for b in banks), _ZERO)
     alias_of = {b["id"]: b["alias"] for b in banks}
+    if investment:
+        notes.append("Investment-purpose bank accounts are left out of start_balance (connections: " + ", ".join(investment) + ").")
     if not banks:
         notes.append("No bank account in scope: the start balance is zero.")
     inflow = _inflow(db, today, scope)

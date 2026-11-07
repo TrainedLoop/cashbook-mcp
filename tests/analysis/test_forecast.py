@@ -99,7 +99,7 @@ def test_no_payer_history_uses_richest_bank_and_notes(fdb):
     with fdb.write() as cur:
         cur.execute("DELETE FROM transactions")
     out = cash_forecast(fdb, TODAY)
-    (e,) = events(out, "bill")
+    (e,) = [e for e in events(out, "bill") if e["date"] == "2026-04-10"]
     assert e["account_id"] == "big"
     assert any("highest balance" in n for n in out["notes"])
 
@@ -124,8 +124,68 @@ def test_installments_seen_at_3_of_10_remaining_seven(fdb):
         tx(cur, "i3", "card", date(2026, 3, 12), "-50.00", "Loja 3/10", "purchase",
            number=3, total=10, purchase=date(2026, 1, 12))  # fmt: skip
     out = cash_forecast(fdb, TODAY, days=90)
-    # No bill_id: the first remaining one falls on the next usual due day (day 10).
-    assert [e["date"] for e in events(out, "installment")] == ["2026-04-10", "2026-05-10", "2026-06-10"]
+    # No bill_id, closing day 3: the 3/12 purchase is in the bill due 4/10, so the next one is due 5/10.
+    assert [e["date"] for e in events(out, "installment")] == ["2026-05-10", "2026-06-10"]
+    with fdb.write() as cur:
+        cur.execute("UPDATE bills SET closing_date = NULL")
+    # Closing unknown (Pluggy's real data): assumed to sit in the next due date after the purchase.
+    out = cash_forecast(fdb, TODAY, days=90)
+    assert [e["date"] for e in events(out, "installment")] == ["2026-05-10", "2026-06-10"]
+
+
+def test_uneven_installment_amounts_counted_once(fdb):
+    with fdb.write() as cur:
+        tx(cur, "u1", "card", date(2026, 2, 20), "-100.01", "Loja 1/4", "purchase",
+           bill_id="b-mar", number=1, total=4, purchase=date(2026, 2, 20))  # fmt: skip
+        tx(cur, "u2", "card", date(2026, 3, 20), "-99.99", "Loja 2/4", "purchase",
+           bill_id="b-apr", number=2, total=4, purchase=date(2026, 2, 20))  # fmt: skip
+    inst = events(cash_forecast(fdb, TODAY, days=90), "installment")
+    assert [(e["date"], e["amount"]) for e in inst] == [("2026-05-10", "-99.99"), ("2026-06-10", "-99.99")]
+
+
+def test_card_balance_stands_in_for_missing_open_bill(fdb):
+    with fdb.write() as cur:
+        cur.execute("UPDATE bills SET closing_date = NULL")
+        cur.execute("DELETE FROM bills WHERE id = 'b-apr'")
+        tx(cur, "i2", "card", date(2026, 3, 20), "-100.00", "Loja 2/4", "purchase",
+           number=2, total=4, purchase=date(2026, 2, 20))  # fmt: skip
+        for n, d in enumerate([date(2026, 1, 5), date(2026, 2, 5), date(2026, 3, 5)]):
+            tx(cur, f"nf-{n}", "card", d, "-50.00", "NETFLIX", "purchase", merchant="Netflix")
+    out = cash_forecast(fdb, TODAY, days=60)
+    (bal,) = events(out, "card_balance")
+    assert (bal["date"], bal["amount"], bal["confidence"], bal["account_id"]) == (
+        "2026-04-10", "-400.00", "low", "bank")  # fmt: skip
+    # Installments and card recurrences start after that bill.
+    assert [e["date"] for e in events(out, "installment")] == ["2026-05-10"]
+    assert all(e["date"] > "2026-04-10" for e in events(out, "recurring"))
+    assert any("closed bills only" in n for n in out["notes"])
+
+
+def test_overdue_unmatched_bill_listed_and_low_event_today(fdb):
+    with fdb.write() as cur:
+        bill(cur, "b-late", date(2026, 3, 25), date(2026, 3, 18), "120.00")
+    out = cash_forecast(fdb, TODAY)
+    low = [e for e in events(out, "bill") if e["confidence"] == "low"]
+    assert [(e["date"], e["amount"]) for e in low] == [("2026-03-31", "-120.00")]
+    assert any("2026-03-25" in n and "120.00" in n and "main" in n for n in out["notes"])
+
+
+def test_stale_recurrence_not_projected_and_late_one_goes_today(fdb):
+    with fdb.write() as cur:
+        for n, d in enumerate([date(2025, 10, 5), date(2025, 11, 5), date(2025, 12, 5)]):
+            tx(cur, f"old-{n}", "bank", d, "3000.00", "Salario", "income", counterpart="Old Employer")
+        for n, d in enumerate([date(2025, 12, 26), date(2026, 1, 25), date(2026, 2, 24)]):
+            tx(cur, f"late-{n}", "bank", d, "-800.00", "Aluguel", "purchase", merchant="Landlord")
+    rec = events(cash_forecast(fdb, TODAY), "recurring")
+    assert [(e["date"], e["amount"]) for e in rec] == [("2026-03-31", "-800.00"), ("2026-04-25", "-800.00")]
+
+
+def test_investment_account_excluded_with_note(fdb):
+    with fdb.write() as cur:
+        cur.execute("INSERT INTO account_settings (account_id, alias, purpose) VALUES ('big', 'main', 'investment')")
+    out = cash_forecast(fdb, TODAY)
+    assert out["start_balance"] == "1000.00"
+    assert any("Investment-purpose" in n for n in out["notes"])
 
 
 def test_bank_recurring_and_income(fdb):

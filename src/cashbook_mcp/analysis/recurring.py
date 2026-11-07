@@ -153,6 +153,9 @@ _MIN_RISE = Decimal("1.00")
 _RISE = Decimal("0.05")
 _NEW_DAYS = 60
 _DUPLICATE_DAYS = 3
+_DUPLICATE_RECENT = 35
+_DUPLICATE_CADENCE = 20
+_STOPPED_DAYS = 90
 _CHANGE_ORDER = {"price_increase": 0, "new": 1, "stopped": 2, "duplicate": 3}
 
 
@@ -169,14 +172,30 @@ def recurring_changes(
         shown = wrap_suspicious(key) if (key, direction) in flagged else key
         base = {"key": shown, "direction": direction}
 
-        for prev, row in pairwise(rows):
-            if row[2] == prev[2] and (row[1] - prev[1]).days <= _DUPLICATE_DAYS:
-                changes.append(
-                    {
-                        "type": "duplicate", **base, "date": row[1].isoformat(),
-                        "amount": jsonable(abs(row[2])), "evidence_ids": [prev[0], row[0]],
-                    }
-                )  # fmt: skip
+        # Duplicates only matter inside a recurring outflow series: the later of two equal
+        # charges at most 3 days apart, within the last 35 days. The series is judged without them.
+        recent = today - timedelta(days=_DUPLICATE_RECENT)
+        pairs = [
+            (prev, row)
+            for prev, row in pairwise(rows)
+            if row[2] == prev[2] and (row[1] - prev[1]).days <= _DUPLICATE_DAYS and row[1] >= recent
+        ]
+        if direction == "out" and pairs:
+            dupes = {r[0] for _, r in pairs}
+            series = sorted(_cluster([r for r in rows if r[0] not in dupes]), key=lambda r: (r[1], r[0]))
+            if len(series) >= 3:
+                stats = _series(series)
+                if (
+                    stats["cadence"] >= _DUPLICATE_CADENCE
+                    and _confidence(stats["cadence"], stats["regularity"], stats["spread"]) != "low"
+                ):
+                    for prev, row in pairs:
+                        changes.append(
+                            {
+                                "type": "duplicate", **base, "date": row[1].isoformat(),
+                                "amount": jsonable(abs(row[2])), "evidence_ids": [prev[0], row[0]],
+                            }
+                        )  # fmt: skip
 
         picked = sorted(_cluster(rows), key=lambda r: (r[1], r[0]))
         if len(picked) >= 3:
@@ -184,7 +203,10 @@ def recurring_changes(
             cadence = stats["cadence"]
             confident = _confidence(cadence, stats["regularity"], stats["spread"]) != "low"
             expected = stats["last"] + timedelta(days=cadence)
-            if confident and cadence >= 1 and is_stopped(expected, cadence, today):
+            if (
+                confident and cadence >= 1 and is_stopped(expected, cadence, today)
+                and (today - expected).days <= _STOPPED_DAYS
+            ):  # fmt: skip
                 changes.append(
                     {
                         "type": "stopped", **base, "expected_date": expected.isoformat(),
@@ -202,6 +224,7 @@ def recurring_changes(
             regular = _confidence(cadence, stats["regularity"], stats["spread"]) != "low"
             if (
                 regular and cadence >= 1 and last not in prior
+                and (today - last[1]).days <= cadence * 1.5
                 and cadence / 2 <= gap <= cadence * 1.5
                 and latest > typical * (1 + _RISE) and latest - typical > _MIN_RISE
             ):  # fmt: skip

@@ -391,9 +391,10 @@ def create_mcp(
 
     @mcp.tool(annotations=READ_ONLY, description=(
         "Changes in recurring charges and incomes over the last `months` months: price_increase (latest "
-        "charge more than 5% and 1.00 above its usual amount), new (a regular series that started in the "
-        "last 60 days), stopped (a series past due by more than half a cadence) and duplicate (same "
-        "name and amount twice within 3 days). Each change carries evidence_ids. Candidates only: decide "
+        "charge more than 5% and 1.00 above its usual amount, seen within 1.5 cadences), new (a regular series that started in the "
+        "last 60 days), stopped (a series past due by more than half a cadence, expected within the last 90 days) and "
+        "duplicate (outflow of a monthly-or-slower series charged twice with the same amount within 3 days, "
+        "in the last 35 days). Each change carries evidence_ids. Candidates only: decide "
         "from the evidence." + SCOPE_NOTE + UNTRUSTED_NOTE
     ))  # fmt: skip
     async def recurring_changes(scope: Scope = "personal", months: int = 6) -> dict:

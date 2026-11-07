@@ -1,7 +1,7 @@
 [project]
 name = "cashbook-mcp"
 version = "0.2.0"
-description = "Read-only MCP server over Pluggy financial data."
+description = "MCP server for Pluggy financial data: read-only toward your banks."
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.13"

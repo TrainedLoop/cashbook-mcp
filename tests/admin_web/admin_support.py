@@ -77,6 +77,7 @@ class FakeSyncer:
         self.preview_result = ItemPreview(
             item_id="item-9", bank="Banco Teste", status="UPDATED",
             accounts=[{"name": "Checking", "type": "BANK", "number": "****2345"}],
+            suggested_role="personal",
         )  # fmt: skip
 
     def _maybe_fail(self, name: str) -> None:

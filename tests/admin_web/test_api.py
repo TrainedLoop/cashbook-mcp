@@ -251,6 +251,7 @@ def test_preview(env):
         "bank": "Banco Teste",
         "status": "UPDATED",
         "accounts": [{"name": "Checking", "type": "BANK", "number": "****2345"}],
+        "suggested_role": "personal",
     }
     assert env.syncer.calls == [("preview", "item-9")]
 
@@ -282,6 +283,7 @@ def test_discover_previews_each_item_and_marks_stored_ones(env):
         "status": "UPDATED",
         "accounts": [{"name": "Checking", "type": "BANK", "number": "****2345"}],
         "error": None,
+        "suggested_role": "personal",
     }
     assert resp.json() == {
         "items": [

@@ -32,6 +32,7 @@ class TxFilters:
     direction: Literal["in", "out"] | None = None
     exclude_internal: bool = True
     scope: Scope | None = None
+    payment_methods: list[str] | None = None
 
 
 def today_in(tz: ZoneInfo, now: datetime) -> date:
@@ -87,6 +88,8 @@ def where_clause(f: TxFilters) -> tuple[str, list]:
             "OR merchant_name ILIKE ? ESCAPE '\\')"
         )
         params.extend([pattern] * 3)
+    if f.payment_methods:
+        _in("upper(payment_method)", [m.strip().upper() for m in f.payment_methods], clauses, params)
     if f.min_amount is not None:
         clauses.append("abs(amount) >= ?")
         params.append(f.min_amount)

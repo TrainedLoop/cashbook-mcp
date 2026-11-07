@@ -173,3 +173,18 @@ def test_normalize_card_installments():
     assert plain.installment_number is None
     assert plain.installment_total is None
     assert plain.purchase_date is None
+
+
+def test_payment_method_is_upper_cased_and_blank_is_none():
+    base = dict(load("transactions_page1.json")["results"][1])
+
+    def method(value):
+        extra = dict(base, id="tx-pm", paymentData={"paymentMethod": value} if value is not None else {})
+        return tx(snapshot([extra]), "tx-pm").payment_method
+
+    assert method("pix") == "PIX"
+    assert method("  Boleto ") == "BOLETO"
+    assert method("TED") == "TED"
+    assert method("   ") is None
+    assert method("") is None
+    assert method(None) is None

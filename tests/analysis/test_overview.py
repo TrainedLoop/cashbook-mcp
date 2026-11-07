@@ -101,3 +101,23 @@ def test_overview_shows_one_off_only_when_non_zero(db, add_row, today):
     mtd = finance_overview(db, today)["month_to_date"]
     assert mtd["spending"] == "408.20" and mtd["one_off_out"] == "900.00"
     assert "one_off_in" not in mtd
+
+
+def test_overview_data_freshness(db, today):
+    assert finance_overview(db, today)["data_freshness"] == {
+        "last_updated": None,
+        "next_update_expected": None,
+    }
+    with db.write() as cur:
+        cur.execute(
+            "UPDATE connections SET last_updated_at = ?, next_auto_sync_at = ? WHERE alias = 'main'",
+            [datetime(2026, 3, 30, 22, 0), datetime(2026, 3, 31, 22, 0)],
+        )
+        cur.execute(
+            "UPDATE connections SET last_updated_at = ?, next_auto_sync_at = ? WHERE alias = 'second'",
+            [datetime(2026, 3, 30, 20, 0), datetime(2026, 3, 31, 23, 0)],
+        )
+    assert finance_overview(db, today)["data_freshness"] == {
+        "last_updated": "2026-03-30T20:00:00+00:00",  # the oldest
+        "next_update_expected": "2026-03-31T22:00:00+00:00",  # the earliest
+    }

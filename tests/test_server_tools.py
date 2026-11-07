@@ -72,8 +72,8 @@ def _populate(db: Database, *, loaded: bool) -> None:
             cur.execute(
                 "INSERT INTO transactions (id, alias, account_id, date, amount, currency, description, "
                 "merchant_name, pluggy_category, kind, kind_reason, text_suspicious, first_seen_at, "
-                "last_seen_at) VALUES (?, 'main', 'acc-main', ?, ?, 'BRL', ?, ?, ?, ?, 'test', ?, ?, ?)",
-                [id, d, Decimal(amount), desc, merchant, cat, kind, id == "t-evil", SEEN, SEEN],
+                "last_seen_at, changed_at) VALUES (?, 'main', 'acc-main', ?, ?, 'BRL', ?, ?, ?, ?, 'test', ?, ?, ?, ?)",
+                [id, d, Decimal(amount), desc, merchant, cat, kind, id == "t-evil", SEEN, SEEN, SEEN],
             )
         if loaded:
             cur.execute(
@@ -109,7 +109,7 @@ async def test_tools_read_only_annotations(server):
     async with Client(server) as c:
         tools = await c.list_tools()
     assert {t.name for t in tools} == ALL_TOOL_NAMES
-    assert len(ALL_TOOL_NAMES) == 22
+    assert len(ALL_TOOL_NAMES) == 23
     writers = {"reclassify_transactions", "undo_reclassification"}
     for t in tools:
         assert t.annotations is not None, t.name
@@ -193,6 +193,7 @@ async def test_every_tool_answers_with_connection_context(server):
         ("query_sql", {"sql": "SELECT count(*) AS n FROM v_transactions"}),
         ("list_reclassifications", {}),
         ("review_classification", {}),
+        ("list_changes", {"limit": 5}),
         ("reclassify_transactions", {"ids": ["t-shop"], "kind": "refund"}),
         ("undo_reclassification", {"change_id": "{change_id}"}),
     ]
@@ -408,6 +409,8 @@ async def test_scope_defaults_to_personal_and_unknown_scope_is_an_error(server):
             ("summarize_transactions", {"group_by": "category", "scope": "nope"}),
             ("list_categories", {"scope": "nope"}),
             ("search_transactions", {"scope": "nope"}),
+            ("list_changes", {"scope": "nope"}),
+            ("list_changes", {"cursor": "garbage!"}),
         ]:
             r = await c.call_tool(name, args, raise_on_error=False)
             assert r.is_error, name

@@ -22,6 +22,8 @@ from cashbook_mcp import prompts
 from cashbook_mcp.admin_web.api import AdminContext, admin_routes
 from cashbook_mcp.admin_web.identity import GoogleIdentity
 from cashbook_mcp.analysis import listing
+from cashbook_mcp.analysis.changes import DEFAULT_LIMIT as DEFAULT_CHANGES_LIMIT
+from cashbook_mcp.analysis.changes import list_changes as _list_changes
 from cashbook_mcp.analysis.filters import TxFilters, today_in
 from cashbook_mcp.analysis.forecast import cash_forecast as _cash_forecast
 from cashbook_mcp.analysis.metrics import Scope
@@ -58,7 +60,7 @@ ALL_TOOL_NAMES = frozenset({
     "list_bills", "list_investments", "get_investment_transactions", "list_loans", "list_categories",
     "summarize_transactions", "cash_flow", "net_worth", "find_recurring", "recurring_changes", "describe_schema", "query_sql",
     "reclassify_transactions", "undo_reclassification", "list_reclassifications", "review_classification",
-    "cash_forecast",
+    "cash_forecast", "list_changes",
 })  # fmt: skip
 
 READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
@@ -203,14 +205,20 @@ def create_mcp(
         "spending and owner_draws) when a business connection exists. `net_worth` (personal) gives the current net and change_this_month, summed only over "
         "the change_components (bank, investment, card) with real, non-estimated values on both days; loans never count. "
         "`forecast` gives the lowest projected personal balance, the first negative date over the next 30 days and "
-        "low_confidence_events, how many projected events have low confidence (see cash_forecast)."
+        "low_confidence_events, how many projected events have low confidence (see cash_forecast). "
+        "`data_freshness` gives `last_updated` (the oldest bank refresh) and `next_update_expected` (the earliest "
+        "next one): banks are refreshed by the data provider about once a day, so transactions made after "
+        "`last_updated` appear only after `next_update_expected`; the server checks hourly and reloads when "
+        "new data is available."
     ))  # fmt: skip
     async def finance_overview(days_ahead: int = 10) -> dict:
         return await respond(lambda: _finance_overview(db, today(), days_ahead))
 
     @mcp.tool(annotations=READ_ONLY, description=(
         "Connected banks: alias, bank, role (personal or business), status, last sync, consent expiry, accounts (each with purpose: regular or investment), stored history range and "
-        "row count, and a remediation hint when something needs fixing."
+        "row count, and a remediation hint when something needs fixing. Banks are refreshed by the data provider "
+        "about once a day: `last_updated_at` is the latest refresh and `next_update_expected` the next one, "
+        "so transactions made after `last_updated_at` appear only after it; the server checks hourly."
     ))  # fmt: skip
     async def list_connections() -> dict:
         return await respond(lambda: {"connections": listing.list_connections(db)})
@@ -222,9 +230,10 @@ def create_mcp(
         return await respond(lambda: {"accounts": listing.list_accounts(db, alias)})
 
     @mcp.tool(annotations=READ_ONLY, description=(
-        "Search transactions, newest first, as compact rows (id, date, amount, alias, description, kind, flow; category, merchant_name, counterpart_name, non-BRL currency and text_suspicious only when set). Use get_transactions for full rows. Filters: "
+        "Search transactions, newest first, as compact rows (id, date, amount, alias, description, kind, flow; category, merchant_name, counterpart_name, non-BRL currency, payment_method other than OTHER, and text_suspicious only when set). Use get_transactions for full rows. Filters: "
         "date range, aliases, account_ids, text (description, merchant or counterpart), categories, kinds, "
-        "min/max absolute amount, direction ('in' or 'out'). Internal transfers and "
+        "min/max absolute amount, direction ('in' or 'out'), payment_methods (e.g. PIX, TED, BOLETO; case-insensitive). "
+        "Boleto payments carry the beneficiary's CNPJ/name in the counterpart fields; the barcode is not provided by the data source. Internal transfers and "
         "card bill payments are excluded unless exclude_internal=false. Without scope, all connections are "
         "searched; scope narrows to personal, business or consolidated. Pages of `limit` rows (default 50, max 200; a larger limit is clamped and the response carries limit_clamped); "
         "pass next_cursor back as cursor for the next page." + DATES_NOTE + UNTRUSTED_NOTE
@@ -244,16 +253,39 @@ def create_mcp(
         scope: Scope | None = None,
         limit: int = 50,
         cursor: str | None = None,
+        payment_methods: list[str] | None = None,
     ) -> dict:
         f = TxFilters(
             date_from, date_to, aliases, account_ids, categories, kinds, text,
             _decimal(min_amount), _decimal(max_amount), direction, exclude_internal, scope,
+            payment_methods,
         )  # fmt: skip
 
         def work() -> dict:
             return _search_transactions(db, f, limit=limit, cursor=cursor)
 
         return await respond(work)
+
+    @mcp.tool(annotations=READ_ONLY, description=(
+        "Transactions that changed since a position, oldest change first: the compact search row plus `change` "
+        "(new, updated or removed). A row changes when it is first synced, its data changes, it disappears from "
+        "the bank, or it is reclassified. For routines: store `next_cursor` and pass it as `cursor` next time to "
+        "read only what changed since; it is always returned, even when nothing changed. Without a cursor it starts "
+        "7 days back, or at `since` (ignored when a cursor is given); first run: pass since=<now> to start fresh, "
+        "then keep next_cursor. Pages of `limit` rows (default 100, max 200); `has_more` says whether more follow. scope "
+        "narrows to personal, business or consolidated (default: all connections). Boleto payments carry the "
+        "beneficiary's CNPJ/name in the counterpart fields; the barcode is not provided by the data source."
+        + UNTRUSTED_NOTE
+    ))  # fmt: skip
+    async def list_changes(
+        cursor: str | None = None,
+        limit: int = DEFAULT_CHANGES_LIMIT,
+        scope: Scope | None = None,
+        since: datetime | None = None,
+    ) -> dict:
+        return await respond(
+            lambda: _list_changes(db, now(), cursor=cursor, limit=limit, scope=scope, since=since)
+        )
 
     @mcp.tool(annotations=READ_ONLY, description=(
         "Full transaction rows by id (at most 100 ids), including counterpart, merchant, category, kind, "

@@ -103,3 +103,14 @@ def test_list_connections_has_role_and_account_purpose(db):
     assert out["second"]["role"] == "business"
     purposes = {a["id"]: a["purpose"] for a in out["main"]["accounts"]}
     assert purposes == {"acc-main": "investment", "card-main": "regular"}
+
+
+def test_list_connections_has_next_update_expected(db):
+    with db.write() as cur:
+        cur.execute(
+            "UPDATE connections SET next_auto_sync_at = ? WHERE alias = 'main'",
+            [datetime(2026, 4, 1, 1, 0)],
+        )
+    out = {c["alias"]: c for c in list_connections(db)}
+    assert out["main"]["next_update_expected"] == "2026-04-01T01:00:00+00:00"
+    assert out["second"]["next_update_expected"] is None

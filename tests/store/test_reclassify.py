@@ -1,4 +1,4 @@
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -146,7 +146,7 @@ def test_overrides_survive_sync_and_ignore_removed_rows(db):
     with db.write() as cur:
         cur.execute("UPDATE transactions SET removed_at = ? WHERE id = 't-2'", [SEEN])
         cur.execute("UPDATE transactions SET kind = 'purchase', kind_reason = 'auto' WHERE id = 't-1'")
-        Syncer._reclassify(cur)  # what every sync runs
+        Syncer._reclassify(cur, NOW.replace(tzinfo=None))  # what every sync runs
     assert state(db, "t-1") == ("refund", f"manual:{out['change_id']}")
     assert len(list_changes(db)) == 1
     assert undo(db, out["change_id"], now=NOW)["reverted"] == 2  # the removed row's override goes too
@@ -193,3 +193,58 @@ def test_reclassify_to_one_off_moves_outflow_out_of_spending_and_undo_restores(d
     assert flow("t-1") == ("one_off", Decimal("0.00"))
     undo(db, out["change_id"], now=NOW)
     assert flow("t-1") == ("spending", Decimal("10.00"))
+
+
+def changed_at(db, tid):
+    cur = db.read()
+    try:
+        return cur.execute("SELECT changed_at FROM transactions WHERE id = ?", [tid]).fetchone()[0]
+    finally:
+        cur.close()
+
+
+def settle(db, extra=None):
+    """Let the fixture rows reach their automatic classification, then pin changed_at to SEEN."""
+    from cashbook_mcp.store.sync import Syncer
+
+    with db.write() as cur:
+        if extra:
+            cur.execute(extra)
+        Syncer._reclassify(cur, SEEN)
+        cur.execute("UPDATE transactions SET changed_at = ?", [SEEN])
+
+
+def test_kind_override_and_undo_move_changed_at(db):
+    settle(db)
+    out = run(db, ["t-1"], kind="refund")
+    assert changed_at(db, "t-1") == datetime(2026, 3, 31, 15, 0)
+    assert changed_at(db, "t-2") == SEEN
+    later = datetime(2026, 4, 2, 9, 0, tzinfo=UTC)
+    undo(db, out["change_id"], now=later)
+    assert changed_at(db, "t-1") == datetime(2026, 4, 2, 9, 0)
+    assert changed_at(db, "t-2") == SEEN
+
+
+def test_category_override_and_undo_move_changed_at(db):
+    settle(db, "UPDATE transactions SET pluggy_category = 'Shopping'")
+    out = reclassify(db, ["t-3"], None, None, category="Housing", now=NOW, tz=TZ, daily_cap=100)
+    assert changed_at(db, "t-3") == datetime(2026, 3, 31, 15, 0)
+    assert changed_at(db, "t-4") == SEEN
+    undo(db, out["change_id"], now=datetime(2026, 4, 2, 9, 0, tzinfo=UTC))
+    assert changed_at(db, "t-3") == datetime(2026, 4, 2, 9, 0)
+
+
+def test_reclassify_and_undo_never_stamp_older_than_existing_changes(db):
+    """A sync that committed later stamps first must not end up ahead of the reclassification."""
+    future = datetime(2026, 4, 5, 8, 0)  # newer than NOW and than the undo's `now`
+    with db.write() as cur:
+        cur.execute("UPDATE transactions SET changed_at = ? WHERE id = 't-4'", [future])
+    out = run(db, ["t-1"], kind="refund")
+    assert changed_at(db, "t-1") == future
+    assert changed_at(db, "t-1") >= changed_at(db, "t-4")
+    created = db.read().execute("SELECT created_at FROM classification_changes").fetchone()[0]
+    assert created == datetime(2026, 3, 31, 15, 0)  # the journal keeps the call's own time
+    with db.write() as cur:
+        cur.execute("UPDATE transactions SET changed_at = ? WHERE id = 't-4'", [future + timedelta(days=1)])
+    undo(db, out["change_id"], now=NOW)
+    assert changed_at(db, "t-1") == future + timedelta(days=1)

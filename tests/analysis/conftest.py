@@ -12,7 +12,7 @@ TODAY = date(2026, 3, 31)
 TX_COLS = (
     "id, alias, account_id, date, amount, currency, original_amount, original_currency, "
     "description, counterpart_name, merchant_name, pluggy_category, bill_id, kind, "
-    "kind_reason, first_seen_at, last_seen_at"
+    "kind_reason, first_seen_at, last_seen_at, changed_at"
 )
 
 
@@ -36,10 +36,10 @@ def add_tx(
 ):
     cur.execute(
         f"INSERT INTO transactions ({TX_COLS}) VALUES "
-        "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test', ?, ?)",
+        "(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'test', ?, ?, ?)",
         [
             id, alias, account_id, d, Decimal(amount), currency, original, original_currency,
-            description, counterpart, merchant, category, bill_id, kind, NOW, NOW,
+            description, counterpart, merchant, category, bill_id, kind, NOW, NOW, NOW,
         ],
     )  # fmt: skip
 

@@ -3,6 +3,7 @@
 from datetime import date, timedelta
 from decimal import Decimal
 
+from cashbook_mcp.presenter import iso_utc
 from cashbook_mcp.store.db import Database
 
 from .filters import jsonable
@@ -77,6 +78,9 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
             "WHERE due_date BETWEEN ? AND ? ORDER BY due_date, id",
             [today, today + timedelta(days=days_ahead)],
         )
+        freshness = cur.execute(
+            "SELECT min(last_updated_at), min(next_auto_sync_at) FROM connections"
+        ).fetchone()
         has_business = cur.execute("SELECT count(*) FROM connections WHERE role = 'business'").fetchone()[0] > 0
         problems = _dicts(
             cur,
@@ -100,6 +104,10 @@ def finance_overview(db: Database, today: date, days_ahead: int = 10) -> dict:
         "month_to_date": month_to_date,
         "top_categories": list_categories(db, month_start, today)[:5],
         "connections_with_problems": problems,
+        "data_freshness": {
+            "last_updated": iso_utc(freshness[0]),
+            "next_update_expected": iso_utc(freshness[1]),
+        },
     }
     overview["net_worth"] = _net_worth_block(db, today)
     projection = cash_forecast(db, today, scope="personal", days=30)

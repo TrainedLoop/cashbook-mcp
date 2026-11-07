@@ -15,8 +15,9 @@ GETS = [
     "/admin/api/server",
 ]
 MUTATIONS = [
-    ("POST", "/admin/api/connect-token", {"alias": "new"}),
+    ("POST", "/admin/api/connect-token", None),
     ("POST", "/admin/api/connections/preview", {"item_id": "item-9"}),
+    ("POST", "/admin/api/connections/discover", {"item_ids": ["item-9"]}),
     ("POST", "/admin/api/connections", {"alias": "new", "item_id": "item-9"}),
     ("POST", "/admin/api/connections/main/reload", None),
     ("POST", "/admin/api/reload", None),
@@ -90,7 +91,7 @@ def test_mutations_require_csrf_and_origin(env, method, path, body):
 
 def test_same_origin_referer_is_accepted_without_origin(env):
     env.login()
-    resp = env.send("POST", "/admin/api/connect-token", {"alias": "new"}, origin=None, referer=f"{PUBLIC}/admin")
+    resp = env.send("POST", "/admin/api/connect-token", origin=None, referer=f"{PUBLIC}/admin")
     assert resp.status_code == 200
 
 
@@ -99,7 +100,7 @@ def test_csrf_of_another_session_is_refused(env):
     other = env.csrf()
     env.client.cookies.clear()
     env.login()  # a sign-in without the session cookie present starts a new session id
-    resp = env.send("POST", "/admin/api/connect-token", {"alias": "new"}, csrf=other)
+    resp = env.send("POST", "/admin/api/connect-token", csrf=other)
     assert resp.status_code == 403
 
 
@@ -247,7 +248,7 @@ def test_preview(env):
     assert resp.status_code == 200
     assert resp.json() == {
         "item_id": "item-9",
-        "connector_name": "MeuPluggy",
+        "bank": "Banco Teste",
         "status": "UPDATED",
         "accounts": [{"name": "Checking", "type": "BANK", "number": "****2345"}],
     }
@@ -269,29 +270,64 @@ def test_preview_refuses_malformed_item_id(env):
     assert env.syncer.calls == []
 
 
+# --- discover -------------------------------------------------------------------------------
+
+
+def test_discover_previews_each_item_and_marks_stored_ones(env):
+    env.login()
+    resp = env.send("POST", "/admin/api/connections/discover", {"item_ids": ["item-9", "item-1", "item-9"]})
+    assert resp.status_code == 200
+    preview = {
+        "bank": "Banco Teste",
+        "status": "UPDATED",
+        "accounts": [{"name": "Checking", "type": "BANK", "number": "****2345"}],
+        "error": None,
+    }
+    assert resp.json() == {
+        "items": [
+            {**preview, "item_id": "item-9", "alias": None},
+            {**preview, "item_id": "item-1", "alias": "main"},
+        ]
+    }
+    assert env.syncer.calls == [("preview", "item-9"), ("preview", "item-1")]
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [(ValidationError("item_not_meupluggy"), "item_not_meupluggy"), (PluggyError("raw secrets", status=500), "pluggy_unavailable")],
+)
+def test_discover_reports_errors_per_item(env, error, code):
+    env.login()
+    env.syncer.errors["preview"] = error
+    resp = env.send("POST", "/admin/api/connections/discover", {"item_ids": ["item-9"]})
+    assert resp.status_code == 200
+    assert resp.json() == {
+        "items": [{"item_id": "item-9", "bank": None, "status": None, "accounts": [], "alias": None, "error": code}]
+    }
+    assert "secrets" not in resp.text
+
+
+@pytest.mark.parametrize("body", [{}, {"item_ids": []}, {"item_ids": "item-9"}, {"item_ids": ["a"] * 21}])
+def test_discover_refuses_a_bad_list(env, body):
+    env.login()
+    resp = env.send("POST", "/admin/api/connections/discover", body)
+    assert resp.status_code == 400
+    assert env.syncer.calls == []
+
+
+def test_discover_refuses_malformed_item_ids(env):
+    env.login()
+    resp = env.send("POST", "/admin/api/connections/discover", {"item_ids": ["item-9", "../items"]})
+    assert resp.status_code == 422 and resp.json() == {"error": "item_unknown"}
+    assert env.syncer.calls == []
+
+
 # --- connect token --------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize("alias", ["Bad", "-a", "a" * 33, "", "a_b", "new\n", 5, None])
-def test_connect_token_validates_alias_first(env, alias):
-    env.login()
-    resp = env.send("POST", "/admin/api/connect-token", {"alias": alias})
-    assert resp.status_code == 422
-    assert resp.json() == {"error": "alias_invalid"}
-    assert env.pluggy.calls == []
-
-
-def test_connect_token_refuses_a_taken_alias(env):
-    env.login()
-    resp = env.send("POST", "/admin/api/connect-token", {"alias": "main"})
-    assert resp.status_code == 422
-    assert resp.json() == {"error": "alias_taken"}
-    assert env.pluggy.calls == []
 
 
 def test_connect_token_issues_token_restricted_to_meupluggy(env):
     env.login()
-    resp = env.send("POST", "/admin/api/connect-token", {"alias": "new-bank"})
+    resp = env.send("POST", "/admin/api/connect-token")
     assert resp.status_code == 200
     assert resp.json() == {"accessToken": "connect-token-1", "connectorIds": [200]}
     assert env.pluggy.calls == [{"avoidDuplicates": True}]
@@ -300,7 +336,7 @@ def test_connect_token_issues_token_restricted_to_meupluggy(env):
 def test_connect_token_pluggy_error_is_generic(env, caplog):
     env.login()
     env.pluggy.error = PluggyError("raw upstream body with secrets", status=500)
-    resp = env.send("POST", "/admin/api/connect-token", {"alias": "new"})
+    resp = env.send("POST", "/admin/api/connect-token")
     assert resp.status_code == 502
     assert resp.json() == {"error": "pluggy_unavailable"}
     assert "secrets" not in resp.text

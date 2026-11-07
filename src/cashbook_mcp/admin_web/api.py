@@ -85,6 +85,7 @@ USED_STATES_CAP = 1000  # consumed flow states remembered at once; beyond it, th
 ADMIN_THREADS = 4
 ADMIN_LIMITER = anyio.CapacityLimiter(ADMIN_THREADS)
 MAX_BODY_BYTES = 16 * 1024
+MAX_DISCOVER_ITEMS = 20
 
 EXPIRED_TEXT = "This sign-in link expired, start again"
 NOT_ALLOWED_TEXT = "This Google account is not allowed"
@@ -566,23 +567,18 @@ def admin_routes(ctx: AdminContext) -> list[Route]:
     # --- API: mutations ---------------------------------------------------------------------
 
     async def connect_token(request: Request) -> Response:
+        """A Connect widget token. Aliases are chosen afterwards, one per item found. With
+        avoidDuplicates, Pluggy refuses a new MeuPluggy item once one exists and lists the existing
+        ones; the SPA reads that list and sends it to discover."""
         s = checked_mutation(request, ctx)
         if isinstance(s, Response):
             return s
-        body = await _json_body(request)
-        if isinstance(body, Response):
-            return body
-        alias = body.get("alias")
-        if not isinstance(alias, str) or not ALIAS_RE.fullmatch(alias):
-            return _error("alias_invalid", 422)
-        if alias in await aliases():
-            return _error("alias_taken", 422)
         try:
             token = await ctx.pluggy.create_connect_token({"avoidDuplicates": True})
         except PluggyError as exc:
             log.warning("admin connect token failed status=%s", exc.status)
             return _error("pluggy_unavailable", 502)
-        log.info("admin connect token issued alias=%s", alias)
+        log.info("admin connect token issued")
         return _json({"accessToken": token, "connectorIds": [MEUPLUGGY_CONNECTOR_ID]})
 
     async def preview(request: Request) -> Response:
@@ -605,6 +601,37 @@ def admin_routes(ctx: AdminContext) -> list[Route]:
             log.warning("admin preview failed status=%s", exc.status)
             return _error("pluggy_unavailable", 502)
         return _json(dataclasses.asdict(result))
+
+    async def discover(request: Request) -> Response:
+        """Previews of several item ids at once, each with the alias it is stored under (if any)
+        or the validation error that keeps it out."""
+        s = checked_mutation(request, ctx)
+        if isinstance(s, Response):
+            return s
+        body = await _json_body(request)
+        if isinstance(body, Response):
+            return body
+        ids = body.get("item_ids")
+        if not isinstance(ids, list) or not ids or len(ids) > MAX_DISCOVER_ITEMS:
+            return _error("bad_request", 400)
+        if not all(isinstance(i, str) and _ITEM_ID.fullmatch(i) for i in ids):
+            return _error("item_unknown", 422)
+        stored = {c.item_id: c.alias for c in await asyncio.to_thread(ctx.syncer.connections)}
+        items = []
+        for item_id in dict.fromkeys(ids):
+            entry: dict[str, Any] = {
+                "item_id": item_id, "bank": None, "status": None, "accounts": [],
+                "alias": stored.get(item_id), "error": None,
+            }  # fmt: skip
+            try:
+                entry |= dataclasses.asdict(await ctx.syncer.preview(item_id)) | {"item_id": item_id}
+            except ValidationError as exc:
+                entry["error"] = exc.code
+            except PluggyError as exc:
+                log.warning("admin discover failed status=%s", exc.status)
+                entry["error"] = "pluggy_unavailable"
+            items.append(entry)
+        return _json({"items": items})
 
     async def add_connection(request: Request) -> Response:
         s = checked_mutation(request, ctx)
@@ -676,6 +703,7 @@ def admin_routes(ctx: AdminContext) -> list[Route]:
         route("/admin/api/connections", connections, "GET"),
         route("/admin/api/connections", add_connection, "POST"),
         route("/admin/api/connections/preview", preview, "POST"),
+        route("/admin/api/connections/discover", discover, "POST"),
         route("/admin/api/connect-token", connect_token, "POST"),
         route("/admin/api/reload", reload_all, "POST"),
         route("/admin/api/connections/{alias}/reload", reload_one, "POST"),

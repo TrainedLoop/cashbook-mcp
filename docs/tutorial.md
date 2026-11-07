@@ -61,7 +61,7 @@ For the Tailscale sidecar, see [examples/tailscale-sidecar](../examples/tailscal
 ## 6. Add connections in `/admin`
 
 1. Open `<PUBLIC_URL>/admin` and sign in with Google (your login in `ALLOWED_EMAILS`; any other is refused).
-2. Choose **Connect with MeuPluggy**, pick an alias (`^[a-z0-9][a-z0-9-]{0,31}$`, for example `nubank` or `itau-joint`) and complete the Pluggy Connect widget. Or use **Add existing item id** with an alias and an item id from MeuPluggy, check the preview and confirm.
+2. Choose **Connect with MeuPluggy** and complete the Pluggy Connect widget. The page then lists every bank MeuPluggy shares, with its accounts, and suggests an alias for each (`^[a-z0-9][a-z0-9-]{0,31}$`, for example `inter` or `itau-joint`). Untick the ones you do not want and choose **Add**. Banks already connected show their alias. Or use **Add existing item id** with an alias and an item id from MeuPluggy, check the preview and confirm.
 3. The first load starts at once. The status badge moves from `syncing` to `ok`; history reaches back `HISTORY_MONTHS` (12) at first and grows from there.
 
 Disconnecting an alias deletes it and all its stored rows, needs a recent Google sign-in and asks you to type the alias. Reconnecting the same bank starts empty with what Pluggy provides.

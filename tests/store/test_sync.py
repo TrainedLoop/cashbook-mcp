@@ -196,7 +196,7 @@ async def test_first_load_inserts(syncer, fake, db):
     conn = await syncer.add_connection("a", "item-a")
 
     assert conn.alias == "a" and conn.item_id == "item-a"
-    assert conn.connector_name == "Bank item-a"
+    assert conn.connector_name == "Checking"
     assert conn.status == "UPDATED"
     assert conn.last_updated_at == datetime(2026, 11, 5, 9, 0)
     assert conn.last_synced_at == datetime(2026, 11, 6, 15, 0)
@@ -414,12 +414,33 @@ async def test_preview_masks_numbers(syncer, fake):
     p = await syncer.preview("item-a")
 
     assert p.item_id == "item-a"
-    assert p.connector_name == "Bank item-a"
+    assert p.bank == "Checking"
     assert p.status == "UPDATED"
     assert p.accounts == [
         {"name": "Checking", "type": "BANK", "number": "****2345"},
         {"name": "Card", "type": "CREDIT", "number": "****4321"},
     ]
+
+
+async def test_bank_name_comes_from_the_accounts(syncer, fake):
+    fake.add_item("item-a")
+    fake.accounts["item-a"].reverse()  # the card first: the checking account still names the bank
+    assert (await syncer.preview("item-a")).bank == "Checking"
+    fake.accounts["item-a"] = [a for a in fake.accounts["item-a"] if a["type"] == "CREDIT"]
+    assert (await syncer.preview("item-a")).bank == "Card"
+    fake.accounts["item-a"] = []
+    assert (await syncer.preview("item-a")).bank == "Bank item-a"
+
+
+async def test_load_refreshes_the_bank_name_but_keeps_it_without_accounts(syncer, fake, db):
+    fake.add_item("item-a")
+    await syncer.add_connection("a", "item-a")
+    fake.accounts["item-a"][0]["name"] = "Renamed Bank"
+    await syncer.load("a")
+    assert syncer.connections()[0].connector_name == "Renamed Bank"
+    fake.accounts["item-a"] = []
+    await syncer.load("a")
+    assert syncer.connections()[0].connector_name == "Renamed Bank"
 
 
 async def test_add_connection_without_load_stores_only_the_connection(syncer, fake, db):
@@ -428,7 +449,8 @@ async def test_add_connection_without_load_stores_only_the_connection(syncer, fa
     conn = await syncer.add_connection("a", "item-a", load=False)
 
     assert conn.alias == "a" and conn.last_synced_at is None
-    assert fake.calls == [("get_item", "item-a")]
+    assert fake.calls == [("get_item", "item-a"), ("list_accounts", "item-a")]  # no data fetched yet
+    assert conn.connector_name == "Checking"
     assert alias_counts(db, "a")["transactions"] == 0
     assert alias_counts(db, "a")["connections"] == 1
     assert (await syncer.load("a")).outcome == "ok"

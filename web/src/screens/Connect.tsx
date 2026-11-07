@@ -1,79 +1,87 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { PluggyConnect } from "react-pluggy-connect";
-import { ALIAS_HINT, api, errorMessage, normalizeAlias, type ConnectTokenResponse } from "../api";
+import { api, errorMessage, existingItemIds, type ConnectTokenResponse, type FoundItem } from "../api";
+import ChooseItems from "../components/ChooseItems";
 
 interface Props {
   onDone: () => void;
   onCancel: () => void;
 }
 
+type Phase =
+  | { kind: "idle" }
+  | { kind: "widget"; token: ConnectTokenResponse }
+  | { kind: "finding" }
+  | { kind: "choose"; items: FoundItem[] };
+
+const NOT_COMPLETED = "The connection did not complete. Try again.";
+
+/**
+ * MeuPluggy shares every bank the owner linked there, one item each, under a single login. The
+ * widget creates them the first time; afterwards Pluggy refuses a new item and names the existing
+ * ones. Either way the owner then gets the whole list and picks an alias per bank.
+ */
 export default function Connect({ onDone, onCancel }: Props) {
-  const [raw, setRaw] = useState("");
-  const [alias, setAlias] = useState<string | null>(null);
-  const [token, setToken] = useState<ConnectTokenResponse | null>(null);
+  const [phase, setPhase] = useState<Phase>({ kind: "idle" });
   const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
+  // Set once the widget reported success or an error, so its closing afterwards changes nothing.
+  const settled = useRef(false);
 
   async function start() {
-    const a = normalizeAlias(raw);
-    if (!a) {
-      setError(ALIAS_HINT);
-      return;
-    }
     setError(null);
-    setBusy(true);
+    setPhase({ kind: "finding" });
     try {
-      setToken(await api.connectToken(a));
-      setAlias(a);
+      const token = await api.connectToken();
+      settled.current = false;
+      setPhase({ kind: "widget", token });
     } catch (e) {
       setError(errorMessage(e));
-    } finally {
-      setBusy(false);
+      setPhase({ kind: "idle" });
     }
   }
 
-  async function onSuccess(data: { item: { id: string } }) {
-    setToken(null);
+  async function find(token: ConnectTokenResponse, created: string | null) {
+    settled.current = true;
+    setPhase({ kind: "finding" });
+    const ids = await existingItemIds(token.accessToken, token.connectorIds[0]);
+    if (created && !ids.includes(created)) ids.unshift(created);
+    if (ids.length === 0) {
+      setError(NOT_COMPLETED);
+      setPhase({ kind: "idle" });
+      return;
+    }
     try {
-      await api.addConnection(alias!, data.item.id);
-      onDone();
+      setPhase({ kind: "choose", items: (await api.discover(ids)).items });
     } catch (e) {
       setError(errorMessage(e));
+      setPhase({ kind: "idle" });
     }
   }
+
+  if (phase.kind === "choose") return <ChooseItems items={phase.items} onDone={onDone} onCancel={onCancel} />;
 
   return (
     <section className="card">
       <h1>Connect with MeuPluggy</h1>
-      <p className="muted">Choose a short alias, then sign in to MeuPluggy in the window that opens.</p>
-      <label className="field">
-        <span>Alias</span>
-        <input
-          value={raw}
-          onChange={(e) => setRaw(e.target.value)}
-          autoComplete="off"
-          autoCapitalize="none"
-          spellCheck={false}
-        />
-      </label>
+      <p className="muted">Sign in to MeuPluggy in the window that opens. You name each bank afterwards.</p>
+      {phase.kind === "finding" && <p role="status" className="muted">Looking for your banks...</p>}
       {error && <p role="alert" className="error">{error}</p>}
       <div className="actions">
         <button type="button" onClick={onCancel}>Back</button>
-        <button type="button" className="primary" onClick={start} disabled={busy}>
+        <button type="button" className="primary" onClick={start} disabled={phase.kind !== "idle"}>
           Connect with MeuPluggy
         </button>
       </div>
-      {token && (
+      {phase.kind === "widget" && (
         <PluggyConnect
-          connectToken={token.accessToken}
+          connectToken={phase.token.accessToken}
           includeSandbox={false}
-          connectorIds={token.connectorIds}
-          onSuccess={onSuccess}
-          onError={() => {
-            setToken(null);
-            setError("The connection did not complete. Try again.");
+          connectorIds={phase.token.connectorIds}
+          onSuccess={(data) => void find(phase.token, data.item.id)}
+          onError={() => void find(phase.token, null)}
+          onClose={() => {
+            if (!settled.current) setPhase({ kind: "idle" });
           }}
-          onClose={() => setToken(null)}
         />
       )}
     </section>

@@ -8,10 +8,18 @@ vi.mock("react-pluggy-connect", () => ({
     includeSandbox?: boolean;
     connectorIds?: number[];
     onSuccess: (d: { item: { id: string } }) => void;
+    onError: (e: { message: string }) => void;
+    onClose: () => void;
   }) => (
-    <button onClick={() => props.onSuccess({ item: { id: "it1" } })}>
-      widget {props.connectToken} sandbox={String(props.includeSandbox)} ids={(props.connectorIds ?? []).join(",")}
-    </button>
+    <div>
+      <button onClick={() => props.onSuccess({ item: { id: "it1" } })}>
+        widget {props.connectToken} sandbox={String(props.includeSandbox)} ids={(props.connectorIds ?? []).join(",")}
+      </button>
+      <button onClick={() => props.onError({ message: "There are other items with the same credentials" })}>
+        widget refuses
+      </button>
+      <button onClick={() => props.onClose()}>widget closes</button>
+    </div>
   ),
 }));
 
@@ -19,11 +27,13 @@ vi.mock("../api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../api")>();
   return {
     ...actual,
+    existingItemIds: vi.fn(),
     api: {
       session: vi.fn(),
       connections: vi.fn(),
       connectToken: vi.fn(),
       preview: vi.fn(),
+      discover: vi.fn(),
       addConnection: vi.fn(),
       reload: vi.fn(),
       disconnectImpact: vi.fn(),
@@ -35,9 +45,19 @@ vi.mock("../api", async (importOriginal) => {
 });
 
 import App from "../App";
-import { api, ApiError, type Connection } from "../api";
+import { api, ApiError, existingItemIds, type Connection, type FoundItem } from "../api";
 
 const m = vi.mocked(api);
+const existing = vi.mocked(existingItemIds);
+
+const found = (item_id: string, bank: string, alias: string | null = null): FoundItem => ({
+  item_id,
+  bank,
+  status: "UPDATED",
+  accounts: [{ name: bank, type: "BANK", number: "****1234" }],
+  alias,
+  error: null,
+});
 
 const conn = (alias: string): Connection => ({
   alias,
@@ -71,43 +91,102 @@ beforeEach(() => {
 });
 
 describe("connect with MeuPluggy", () => {
-  it("adds the connection with the widget's item id and refreshes the list", async () => {
+  async function openWidget(user: ReturnType<typeof userEvent.setup>) {
+    render(<App />);
+    await user.click(await screen.findByRole("button", { name: "Connect with MeuPluggy" }));
+    await user.click(screen.getByRole("button", { name: "Connect with MeuPluggy" }));
+  }
+
+  it("lists every MeuPluggy item after the widget succeeds and adds the chosen ones", async () => {
     const user = userEvent.setup();
     m.connectToken.mockResolvedValue({ accessToken: "ct-1", connectorIds: [200] });
-    m.addConnection.mockResolvedValue({ alias: "nubank", started: true });
-    render(<App />);
+    existing.mockResolvedValue(["it2", "it3"]);
+    m.discover.mockResolvedValue({
+      items: [found("it1", "BANCO INTER"), found("it2", "CAIXA", "caixa"), found("it3", "XP")],
+    });
+    m.addConnection.mockResolvedValue({ alias: "x", started: true });
+    await openWidget(user);
 
-    await user.click(await screen.findByRole("button", { name: "Connect with MeuPluggy" }));
-    await user.type(screen.getByLabelText("Alias"), "  NuBank ");
-    m.connections.mockResolvedValue({ connections: [conn("nubank")] });
-    await user.click(screen.getByRole("button", { name: "Connect with MeuPluggy" }));
+    expect(m.connectToken).toHaveBeenCalledWith();
+    await user.click(await screen.findByRole("button", { name: /widget ct-1 sandbox=false ids=200/ }));
 
-    expect(m.connectToken).toHaveBeenCalledWith("nubank");
-    const widget = await screen.findByRole("button", { name: /widget ct-1 sandbox=false ids=200/ });
-    await user.click(widget);
+    expect(await screen.findByRole("heading", { name: "Choose your banks" })).toBeInTheDocument();
+    expect(existing).toHaveBeenCalledWith("ct-1", 200);
+    expect(m.discover).toHaveBeenCalledWith(["it1", "it2", "it3"]);
+    expect(screen.getByText("caixa")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Alias for CAIXA")).not.toBeInTheDocument();
+    expect(screen.getByLabelText("Alias for BANCO INTER")).toHaveValue("inter");
+    const xp = screen.getByLabelText("Alias for XP");
+    expect(xp).toHaveValue("xp");
+    await user.clear(xp);
+    await user.type(xp, "XP-Invest");
 
-    await waitFor(() => expect(m.addConnection).toHaveBeenCalledWith("nubank", "it1"));
-    expect(await screen.findByText("nubank")).toBeInTheDocument();
+    m.connections.mockResolvedValue({ connections: [conn("inter")] });
+    await user.click(screen.getByRole("button", { name: "Add 2 banks" }));
+    await waitFor(() => expect(m.addConnection).toHaveBeenCalledTimes(2));
+    expect(m.addConnection).toHaveBeenNthCalledWith(1, "inter", "it1");
+    expect(m.addConnection).toHaveBeenNthCalledWith(2, "xp-invest", "it3");
+    expect(await screen.findByRole("heading", { name: "Connections" })).toBeInTheDocument();
   });
 
-  it("rejects an invalid alias inline without calling the API", async () => {
+  it("uses Pluggy's refusal when the widget reports an error, and skips unchecked banks", async () => {
     const user = userEvent.setup();
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: "Connect with MeuPluggy" }));
-    await user.type(screen.getByLabelText("Alias"), "-bad_alias");
-    await user.click(screen.getByRole("button", { name: "Connect with MeuPluggy" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/lowercase letters, digits and hyphens/i);
-    expect(m.connectToken).not.toHaveBeenCalled();
+    m.connectToken.mockResolvedValue({ accessToken: "ct-1", connectorIds: [200] });
+    existing.mockResolvedValue(["it2", "it3"]);
+    m.discover.mockResolvedValue({ items: [found("it2", "CAIXA"), found("it3", "XP")] });
+    m.addConnection.mockResolvedValue({ alias: "x", started: true });
+    await openWidget(user);
+    await user.click(await screen.findByRole("button", { name: "widget refuses" }));
+
+    await user.click(await screen.findByRole("checkbox", { name: "Connect XP" }));
+    await user.click(screen.getByRole("button", { name: "Add 1 bank" }));
+    await waitFor(() => expect(m.addConnection).toHaveBeenCalledWith("caixa", "it2"));
+    expect(m.addConnection).toHaveBeenCalledTimes(1);
   });
 
-  it("shows a friendly message for a 422 code", async () => {
+  it("keeps the screen and shows the error of a bank that could not be added", async () => {
     const user = userEvent.setup();
-    m.connectToken.mockRejectedValue(new ApiError(422, "alias_taken"));
-    render(<App />);
-    await user.click(await screen.findByRole("button", { name: "Connect with MeuPluggy" }));
-    await user.type(screen.getByLabelText("Alias"), "nubank");
-    await user.click(screen.getByRole("button", { name: "Connect with MeuPluggy" }));
+    m.connectToken.mockResolvedValue({ accessToken: "ct-1", connectorIds: [200] });
+    existing.mockResolvedValue(["it2", "it3"]);
+    m.discover.mockResolvedValue({ items: [found("it2", "CAIXA"), found("it3", "XP")] });
+    m.addConnection.mockImplementation(async (alias) => {
+      if (alias === "xp") throw new ApiError(422, "alias_taken");
+      return { alias, started: true };
+    });
+    await openWidget(user);
+    await user.click(await screen.findByRole("button", { name: "widget refuses" }));
+    await user.click(await screen.findByRole("button", { name: "Add 2 banks" }));
+
     expect(await screen.findByRole("alert")).toHaveTextContent("That alias is already in use.");
+    expect(screen.getByText("Added as", { exact: false })).toHaveTextContent("Added as caixa.");
+    expect(screen.getByRole("button", { name: "Add 1 bank" })).toBeInTheDocument();
+  });
+
+  it("says so when nothing was found", async () => {
+    const user = userEvent.setup();
+    m.connectToken.mockResolvedValue({ accessToken: "ct-1", connectorIds: [200] });
+    existing.mockResolvedValue([]);
+    await openWidget(user);
+    await user.click(await screen.findByRole("button", { name: "widget refuses" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("The connection did not complete. Try again.");
+    expect(m.discover).not.toHaveBeenCalled();
+  });
+
+  it("goes back to the start when the widget is closed without a result", async () => {
+    const user = userEvent.setup();
+    m.connectToken.mockResolvedValue({ accessToken: "ct-1", connectorIds: [200] });
+    await openWidget(user);
+    await user.click(await screen.findByRole("button", { name: "widget closes" }));
+    expect(screen.queryByRole("button", { name: "widget closes" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Connect with MeuPluggy" })).toBeEnabled();
+    expect(existing).not.toHaveBeenCalled();
+  });
+
+  it("shows a friendly message when the token cannot be issued", async () => {
+    const user = userEvent.setup();
+    m.connectToken.mockRejectedValue(new ApiError(502, "pluggy_unavailable"));
+    await openWidget(user);
+    expect(await screen.findByRole("alert")).toHaveTextContent("Pluggy is unavailable right now.");
   });
 });
 
@@ -116,7 +195,7 @@ describe("add existing item", () => {
     const user = userEvent.setup();
     m.preview.mockResolvedValue({
       item_id: "abc-123",
-      connector_name: "MeuPluggy",
+      bank: "BANCO TESTE",
       status: "UPDATED",
       accounts: [{ name: "Conta", type: "BANK", number: "****1234" }],
     });
@@ -126,7 +205,7 @@ describe("add existing item", () => {
     await user.type(screen.getByLabelText("Alias"), "main");
     await user.type(screen.getByLabelText("Item id"), "abc-123");
     await user.click(screen.getByRole("button", { name: "Preview" }));
-    expect(await screen.findByText("MeuPluggy")).toBeInTheDocument();
+    expect(await screen.findByText("BANCO TESTE")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add connection" }));
     await waitFor(() => expect(m.addConnection).toHaveBeenCalledWith("main", "abc-123"));
   });

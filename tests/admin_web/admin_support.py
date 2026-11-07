@@ -75,7 +75,7 @@ class FakeSyncer:
         self.release.set()
         self.loads_started = threading.Event()
         self.preview_result = ItemPreview(
-            item_id="item-9", connector_name="MeuPluggy", status="UPDATED",
+            item_id="item-9", bank="Banco Teste", status="UPDATED",
             accounts=[{"name": "Checking", "type": "BANK", "number": "****2345"}],
         )  # fmt: skip
 

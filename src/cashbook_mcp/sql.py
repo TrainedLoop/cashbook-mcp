@@ -13,12 +13,15 @@ module adds:
 - a timeout that interrupts the query, and a row cap.
 """
 
+import itertools
 import json
+import math
 import re
 import threading
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from time import monotonic
 from uuid import UUID
 
 import duckdb
@@ -43,6 +46,20 @@ TRUNCATED_SUFFIX = "…[truncated]"
 
 # Grace period for the worker to roll back and close after an interrupt.
 _INTERRUPT_GRACE_S = 5.0
+# Query workers alive at once. Callers beyond it wait for a slot (up to their
+# timeout), so parallel tool calls queue instead of failing. A worker that
+# ignores the interrupt keeps its slot until it ends, so stuck queries cannot
+# pile up threads without bound.
+MAX_WORKERS = 4
+_workers = threading.BoundedSemaphore(MAX_WORKERS)
+# When each live worker is expected to have ended (start + timeout + grace),
+# by worker id; read to tell the agent how long a "busy" will last.
+_deadlines: dict[int, float] = {}
+_deadlines_lock = threading.Lock()
+_worker_ids = itertools.count()
+# Retry hint when every slot is held by a query that ignored its interrupt:
+# when those end cannot be known.
+STUCK_RETRY_S = 60
 _MAX_MESSAGE_CHARS = 300
 _FETCH_BATCH = 64
 _SUBQUERY_ALIAS = "__cb_q"
@@ -113,8 +130,11 @@ _TEXT_TYPES = frozenset({"VARCHAR", "JSON"})
 class SqlRejected(Exception):
     """The query was not accepted or failed; reason is a short machine-readable code."""
 
-    def __init__(self, reason: str, message: str | None = None) -> None:
+    def __init__(
+        self, reason: str, message: str | None = None, details: dict | None = None
+    ) -> None:
         self.reason = reason
+        self.details = details or {}
         super().__init__(f"{reason}: {message}" if message else reason)
 
 
@@ -409,6 +429,34 @@ def _size(row: list) -> int:
     return len(json.dumps(row, ensure_ascii=False, default=str).encode())
 
 
+def _release(worker_id: int) -> None:
+    with _deadlines_lock:
+        _deadlines.pop(worker_id, None)
+    _workers.release()
+
+
+def _busy(waited_s: float) -> SqlRejected:
+    """The "busy" rejection, with the limit and a retry estimate for the agent."""
+    now = monotonic()
+    with _deadlines_lock:
+        remaining = [d - now for d in _deadlines.values()]
+    pending = [r for r in remaining if r > 0]
+    if pending:
+        # Some slot holder is still within its timeout and grace: it ends by then.
+        retry = max(1, math.ceil(min(pending)))
+        why = "other queries are still running"
+    else:
+        retry = STUCK_RETRY_S
+        why = "the running queries did not stop when interrupted"
+    message = (
+        f"all {MAX_WORKERS} query slots are taken ({why}); waited {waited_s:g} s. "
+        f"Retry in about {retry} s, or use the other tools meanwhile (they do not "
+        "use these slots)."
+    )
+    details = {"max_parallel": MAX_WORKERS, "running": len(remaining), "retry_after_s": retry}
+    return SqlRejected("busy", message, details)
+
+
 def run_query(
     db: Database, sql: str, *, max_rows: int = MAX_ROWS, timeout_s: float = TIMEOUT_S
 ) -> QueryResult:
@@ -425,7 +473,16 @@ def run_query(
     statement = _check(sql)
     inner = _bounded_sql(sql, statement)
 
-    cur = db.read()
+    if not _workers.acquire(timeout=timeout_s):
+        raise _busy(timeout_s)
+    worker_id = next(_worker_ids)
+    with _deadlines_lock:
+        _deadlines[worker_id] = monotonic() + timeout_s + _INTERRUPT_GRACE_S
+    try:
+        cur = db.read()
+    except BaseException:
+        _release(worker_id)
+        raise
     done = threading.Event()
     outcome: dict[str, object] = {}
 
@@ -497,6 +554,7 @@ def run_query(
             try:
                 cur.close()
             finally:
+                _release(worker_id)
                 done.set()
 
     worker = threading.Thread(target=work, name="cashbook-sql", daemon=True)

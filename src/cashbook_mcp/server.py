@@ -60,6 +60,8 @@ READ_ONLY = {"readOnlyHint": True, "destructiveHint": False, "idempotentHint": T
 WRITE = {"readOnlyHint": False, "destructiveHint": False, "idempotentHint": True, "openWorldHint": False}
 LOADING = {"status": "loading", "message": "First data load in progress; retry in a minute."}
 SQL_ERROR_PREFIX = "DuckDB said (may quote stored third-party text): "
+# Rejections whose message may come from DuckDB (and so quote stored text); the rest are the sandbox's own.
+SQL_DUCKDB_REASONS = frozenset({"syntax", "not_select", "error"})
 
 INSTRUCTIONS = (
     "Read-only access to the owner's bank data (accounts, card bills, transactions, investments, loans), "
@@ -403,7 +405,8 @@ def create_mcp(
             try:
                 r = run_query(db, sql)
             except SqlRejected as e:
-                return {"error": e.reason, "message": SQL_ERROR_PREFIX + _sql_message(e)}
+                prefix = SQL_ERROR_PREFIX if e.reason in SQL_DUCKDB_REASONS else ""
+                return {"error": e.reason, "message": prefix + _sql_message(e), **e.details}
             return {
                 "columns": r.columns,
                 "types": r.types,

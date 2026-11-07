@@ -50,7 +50,7 @@ def test_release_checks_tag_against_pyproject_version():
 
 def test_dockerfile_shape():
     text = (ROOT / "Dockerfile").read_text()
-    assert "node:22-slim" in text and "python:3.13-slim@sha256:" in text
+    assert "node:24-slim" in text and "python:3.13-slim@sha256:" in text
     assert "CMD [\"cashbook-mcp\"]" in text
     assert "PORT=8743" in text
 

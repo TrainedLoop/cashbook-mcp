@@ -39,7 +39,8 @@ _TRANSACTION_DOCS: dict[str, str] = {
     "kind": "Server classification: purchase, income, internal_transfer, "
     "card_bill_payment, refund, investment, fee, loan or other (see notes).",
     "kind_reason": "Machine-readable reason for kind, e.g. matched_card_bill:<bill_id>, "
-    "counterpart_is_own_account:<alias>, pluggy_category:<category>, sign.",
+    "counterpart_is_own_account:<alias>, paired_with:<transaction id> (the other side of a "
+    "transfer between own accounts), pluggy_category:<category>, sign.",
     "text_suspicious": "True if a text column of this row was flagged as a possible "
     "prompt injection (its value is wrapped in the suspicious marker).",
     "suspicion_reasons": "List of reasons the text was flagged; empty when not flagged.",
@@ -182,9 +183,10 @@ NOTES: list[str] = [
         "kind values: purchase = money out not otherwise classified; "
         "income = money in not otherwise classified; "
         "internal_transfer = transfer to or from one of the owner's own accounts "
-        "(own account number or own CPF/CNPJ); "
-        "card_bill_payment = payment of a credit-card bill (bank debit matched to a bill, "
-        "or the payment received on the card); "
+        "(own account number or own CPF/CNPJ, or the same amount leaving one own account and "
+        "reaching another within 3 days); "
+        "card_bill_payment = payment of a credit-card bill (bank debit matched to a bill or to "
+        "the same credit on the card, or the payment received on the card); "
         "refund = credit on a card account; "
         "investment = money moved into or out of investments; "
         "fee = bank fees, interest and taxes; "

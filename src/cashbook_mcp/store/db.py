@@ -96,6 +96,10 @@ def _wal(path: Path) -> Path:
     return path.with_name(path.name + ".wal")
 
 
+def _tmp_dir(path: Path) -> Path:
+    return path.with_name(path.name + ".tmp")
+
+
 def _pending(migrations_dir: Path, current: int) -> list[tuple[int, Path]]:
     found: dict[int, Path] = {}
     for file in sorted(migrations_dir.iterdir()):
@@ -187,6 +191,10 @@ class Database:
             _migrate(conn, path, key, migrations_dir)
             conn.execute("SET memory_limit='256MB'")
             conn.execute("SET threads=2")
+            # Spill next to the store, encrypted: the default (".tmp" in the working
+            # directory) is not writable in the container and would hold plaintext.
+            conn.execute(f"SET temp_directory = {_quote(str(_tmp_dir(path)))}")
+            conn.execute("SET temp_file_encryption = true")
             conn.execute("SET enable_external_access=false")
             conn.execute("SET lock_configuration=true")
         except BaseException:

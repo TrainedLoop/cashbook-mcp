@@ -10,6 +10,7 @@ from fastmcp import Client
 from starlette.testclient import TestClient
 
 from cashbook_mcp import prompts
+from cashbook_mcp import server as server_module
 from cashbook_mcp.auth import AllowlistGoogleProvider
 from cashbook_mcp.config import DEFAULT_REDIRECT_URIS, Secrets, Settings
 from cashbook_mcp.content import wrap_suspicious
@@ -23,6 +24,7 @@ from cashbook_mcp.server import (
     build_app,
     create_mcp,
 )
+from cashbook_mcp.sql import SqlRejected
 from cashbook_mcp.store.db import Database
 from cashbook_mcp.store.scheduler import Scheduler
 from cashbook_mcp.store.sync import Syncer
@@ -143,6 +145,17 @@ async def test_query_sql_rejections_are_results(server):
     out = await call(server, "query_sql", {"sql": "SELECT description::INTEGER FROM v_transactions"})
     assert out["error"] == "error"
     assert out["message"].startswith(SQL_ERROR_PREFIX)
+
+
+async def test_query_sql_busy_carries_the_limit_and_retry_hint(server, monkeypatch):
+    def busy(db, sql):
+        raise SqlRejected("busy", "all 4 query slots are taken", {"max_parallel": 4, "running": 4, "retry_after_s": 7})
+
+    monkeypatch.setattr(server_module, "run_query", busy)
+    out = await call(server, "query_sql", {"sql": "SELECT 1"})
+    assert out["error"] == "busy"
+    assert out["message"] == "all 4 query slots are taken"  # the sandbox's own text: no DuckDB prefix
+    assert (out["max_parallel"], out["running"], out["retry_after_s"]) == (4, 4, 7)
 
 
 async def test_query_sql_nan_is_null(server):

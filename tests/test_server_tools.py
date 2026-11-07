@@ -14,6 +14,7 @@ from cashbook_mcp import server as server_module
 from cashbook_mcp.auth import AllowlistGoogleProvider
 from cashbook_mcp.config import DEFAULT_REDIRECT_URIS, Secrets, Settings
 from cashbook_mcp.content import wrap_suspicious
+from cashbook_mcp.models import KINDS
 from cashbook_mcp.pluggy.client import PluggyError
 from cashbook_mcp.presenter import SUSPICIOUS_NOTE
 from cashbook_mcp.server import (
@@ -108,9 +109,16 @@ async def test_tools_read_only_annotations(server):
     async with Client(server) as c:
         tools = await c.list_tools()
     assert {t.name for t in tools} == ALL_TOOL_NAMES
-    assert len(ALL_TOOL_NAMES) == 15
+    assert len(ALL_TOOL_NAMES) == 22
+    writers = {"reclassify_transactions", "undo_reclassification"}
     for t in tools:
-        assert t.annotations is not None and t.annotations.read_only_hint is True, t.name
+        assert t.annotations is not None, t.name
+        if t.name in writers:
+            a = t.annotations
+            assert (a.read_only_hint, a.destructive_hint, a.idempotent_hint, a.open_world_hint) == (
+                False, False, True, False), t.name
+        else:
+            assert t.annotations.read_only_hint is True, t.name
 
 
 async def test_loading_state(tmp_path):
@@ -177,14 +185,24 @@ async def test_every_tool_answers_with_connection_context(server):
         ("list_categories", {"date_from": "2026-03-01", "date_to": "2026-03-31"}),
         ("summarize_transactions", {"group_by": "category", "compare_previous": True}),
         ("cash_flow", {"date_from": "2026-01-01", "date_to": "2026-03-31"}),
+        ("net_worth", {}),
         ("find_recurring", {"months": 6}),
+        ("recurring_changes", {"months": 6}),
+        ("cash_forecast", {"days": 45, "by_account": True}),
         ("describe_schema", {}),
         ("query_sql", {"sql": "SELECT count(*) AS n FROM v_transactions"}),
+        ("list_reclassifications", {}),
+        ("review_classification", {}),
+        ("reclassify_transactions", {"ids": ["t-shop"], "kind": "refund"}),
+        ("undo_reclassification", {"change_id": "{change_id}"}),
     ]
     assert {n for n, _ in calls} == ALL_TOOL_NAMES
     async with Client(server) as c:
+        change_id = None
         for name, args in calls:
+            args = {k: (change_id if v == "{change_id}" else v) for k, v in args.items()}
             out = (await c.call_tool(name, args)).structured_content
+            change_id = out.get("change_id", change_id)
             json.dumps(out, allow_nan=False)
             assert "error" not in out, (name, out)
             assert out["data_as_of"]["main"] == "2026-03-31T09:00:00+00:00", name
@@ -194,11 +212,10 @@ async def test_every_tool_answers_with_connection_context(server):
 async def test_search_and_get_shapes(server):
     page = await call(server, "search_transactions", {"direction": "out", "limit": 2})
     assert [r["id"] for r in page["rows"]] == ["t-evil", "t-shop"]
-    assert set(page["rows"][0]) == {
-        "id", "date", "alias", "account_id", "amount", "currency", "kind", "category",
-        "description", "suspicious",
-    }  # fmt: skip
-    assert page["rows"][0]["suspicious"] is True
+    assert {"id", "date", "amount", "alias", "description", "kind", "flow"} <= set(page["rows"][0])
+    assert not {"account_id", "role", "original_amount", "kind_reason"} & set(page["rows"][0])
+    assert page["rows"][0]["flow"] == "spending"
+    assert page["rows"][0]["text_suspicious"] is True
     assert page["suspicious_values"] == 1
     nxt = await call(server, "search_transactions", {"direction": "out", "limit": 2, "cursor": page["next_cursor"]})
     assert nxt["rows"][0]["id"] == "t-sub-15"
@@ -266,7 +283,7 @@ async def test_lifespan_runs_scheduler_in_background(tmp_path):
 async def test_prompts_registered_and_name_real_tools(server):
     async with Client(server) as c:
         listed = {p.name: p for p in await c.list_prompts()}
-        assert set(listed) == {"monthly_review", "subscriptions_audit", "upcoming_bills"}
+        assert set(listed) == {"monthly_review", "subscriptions_audit", "upcoming_bills", "review_classifications", "weekly_review"}
         r = await c.get_prompt("monthly_review", {"month": "2026-02"})
         text = r.messages[0].content.text
     assert "2026-02-01" in text and "2026-02-28" in text
@@ -275,6 +292,8 @@ async def test_prompts_registered_and_name_real_tools(server):
         prompts.monthly_review("2026-02"),
         prompts.subscriptions_audit(today=day),
         prompts.upcoming_bills(7, today=day),
+        prompts.review_classifications(),
+        prompts.weekly_review(),
     )
     for body in bodies:
         named = set(prompts.TOOL_CALL.findall(body))
@@ -368,3 +387,104 @@ async def test_prompts_render_explicit_dates(server):
     assert "days_ahead=7" in bills
     # Leap-day edge: twelve months before 2024-02-29 is clamped to 2023-02-28.
     assert 'date_from="2023-02-28"' in prompts.subscriptions_audit(today=date(2024, 2, 29))
+
+
+async def test_scope_defaults_to_personal_and_unknown_scope_is_an_error(server):
+    flow = await call(server, "cash_flow", {"date_from": "2026-03-01", "date_to": "2026-03-31"})
+    assert flow["scope"] == "personal"
+    business = await call(
+        server, "cash_flow", {"date_from": "2026-03-01", "date_to": "2026-03-31", "scope": "business"}
+    )
+    assert business["scope"] == "business"
+    assert business["totals"]["spending"] == "0.00"
+    cats = await call(server, "list_categories", {})
+    assert cats["scope"] == "personal" and cats["categories"]
+    assert (await call(server, "list_categories", {"scope": "business"}))["categories"] == []
+    summary = await call(server, "summarize_transactions", {"group_by": "category", "scope": "business"})
+    assert summary["groups"] == [] and summary["scope"] == "business"
+    async with Client(server) as c:
+        for name, args in [
+            ("cash_flow", {"date_from": "2026-03-01", "date_to": "2026-03-31", "scope": "nope"}),
+            ("summarize_transactions", {"group_by": "category", "scope": "nope"}),
+            ("list_categories", {"scope": "nope"}),
+            ("search_transactions", {"scope": "nope"}),
+        ]:
+            r = await c.call_tool(name, args, raise_on_error=False)
+            assert r.is_error, name
+
+
+async def test_search_scope_filters_rows(server):
+    business = await call(server, "search_transactions", {"scope": "business"})
+    assert business["rows"] == []
+    personal = await call(server, "search_transactions", {"scope": "personal", "limit": 1})
+    assert len(personal["rows"]) == 1
+    full = await call(server, "get_transactions", {"ids": ["t-shop"]})
+    assert full["transactions"][0]["role"] == "personal"
+    assert full["transactions"][0]["flow"] == "spending"
+
+
+async def test_summarize_accepts_two_group_by_dimensions(server):
+    out = await call(
+        server,
+        "summarize_transactions",
+        {"group_by": ["category", "month"], "date_from": "2026-03-01", "date_to": "2026-03-31"},
+    )
+    assert out["groups"]
+    assert out["groups"][0]["key"] == ["Groceries", "2026-03"]
+
+
+async def test_list_connections_shows_role_and_purpose(server):
+    out = await call(server, "list_connections")
+    main = next(c for c in out["connections"] if c["alias"] == "main")
+    assert main["role"] == "personal"
+    assert main["accounts"][0]["purpose"] == "regular"
+
+
+async def test_describe_schema_lists_flows_not_spending(server):
+    out = await call(server, "describe_schema")
+    names = {r["name"] for r in out["relations"]}
+    assert "v_flows" in names and "v_spending" not in names
+    assert "account_settings" in names
+    assert any("v_flows" in n and "totals" in n for n in out["notes"])
+
+
+async def test_reclassify_tools_and_error_shape(tmp_path):
+    db = Database.open(tmp_path / "s.duckdb", KEY)
+    _populate(db, loaded=True)
+    syncer = Syncer(db, NoNetworkClient(), history_months=12, tz=TZ, now=lambda: NOW, tool_names=ALL_TOOL_NAMES)
+    mcp = create_mcp(db=db, syncer=syncer, tz=TZ, now=lambda: NOW, max_reclassify_per_day=1)
+    try:
+        out = await call(mcp, "reclassify_transactions", {"ids": ["t-shop"], "kind": "refund", "note": "n"})
+        assert out["count"] == 1 and out["changes"] == [{"id": "t-shop", "old_kind": "purchase", "new_kind": "refund"}]
+        rows = await call(mcp, "query_sql", {"sql": "SELECT kind FROM v_transactions WHERE id = 't-shop'"})
+        assert rows["rows"] == [["refund"]]
+        capped = await call(mcp, "reclassify_transactions", {"ids": ["t-evil"], "kind": "refund"})
+        assert capped["error"] == "daily_cap" and capped["remaining"] == 0 and "message" in capped
+        bad = await call(mcp, "reclassify_transactions", {"ids": ["nope"], "kind": "refund"})
+        assert bad["error"] == "unknown_ids" and bad["unknown_ids"] == ["nope"]
+        listed = await call(mcp, "list_reclassifications")
+        assert [c["change_id"] for c in listed["changes"]] == [out["change_id"]]
+        undone = await call(mcp, "undo_reclassification", {"change_id": out["change_id"]})
+        assert undone["reverted"] == 1
+        again = await call(mcp, "undo_reclassification", {"change_id": out["change_id"]})
+        assert again["error"] == "already_undone"
+    finally:
+        db.close()
+
+
+async def test_reclassify_schema_lists_kinds(server):
+    async with Client(server) as c:
+        tool = next(t for t in await c.list_tools() if t.name == "reclassify_transactions")
+    schema = tool.input_schema["properties"]["kind"]
+    assert set(schema["enum"]) == set(KINDS)
+
+
+async def test_summarize_schema_exposes_group_by_values(server):
+    async with Client(server) as c:
+        tool = next(t for t in await c.list_tools() if t.name == "summarize_transactions")
+    schema = json.dumps(tool.input_schema["properties"]["group_by"])
+    for value in ("category", "merchant", "month", "week", "account", "kind"):
+        assert f'"{value}"' in schema
+    forms = tool.input_schema["properties"]["group_by"]["anyOf"]
+    assert any(f.get("type") == "array" for f in forms)  # the list form
+    assert any(f.get("type") != "array" for f in forms)  # the single form

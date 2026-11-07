@@ -8,7 +8,8 @@ from cashbook_mcp.store.db import Database
 
 from .filters import TxFilters, jsonable, where_clause
 
-MAX_LIMIT = 500
+DEFAULT_LIMIT = 50
+MAX_LIMIT = 200
 MAX_IDS = 100
 
 COLUMNS = (
@@ -31,12 +32,34 @@ COLUMNS = (
     "kind_reason",
     "text_suspicious",
     "suspicion_reasons",
+    "role",
+    "flow",
 )
 _SELECT = ", ".join(COLUMNS)
 
 
 def _row(values: tuple) -> dict:
     return {c: jsonable(v) for c, v in zip(COLUMNS, values, strict=True)}
+
+
+_ALWAYS = ("id", "date", "amount", "alias", "description", "kind", "flow")
+
+
+def compact_row(row: dict) -> dict:
+    """The few fields an agent needs per hit; empty or default fields are left out."""
+    out = {k: row[k] for k in _ALWAYS}
+    for key, src in (
+        ("category", "pluggy_category"),
+        ("merchant_name", "merchant_name"),
+        ("counterpart_name", "counterpart_name"),
+    ):
+        if row[src] is not None:
+            out[key] = row[src]
+    if row["currency"] != "BRL":
+        out["currency"] = row["currency"]
+    if row["text_suspicious"]:
+        out["text_suspicious"] = True
+    return out
 
 
 def encode_cursor(d: date, tx_id: str) -> str:
@@ -53,8 +76,10 @@ def decode_cursor(cursor: str) -> tuple[date, str]:
 
 
 def search_transactions(
-    db: Database, f: TxFilters, *, limit: int = 100, cursor: str | None = None
+    db: Database, f: TxFilters, *, limit: int = DEFAULT_LIMIT, cursor: str | None = None
 ) -> dict:
+    """One page of compact rows; `limit_clamped` is set when limit exceeded MAX_LIMIT."""
+    clamped = int(limit) > MAX_LIMIT
     limit = max(1, min(int(limit), MAX_LIMIT))
     where, params = where_clause(f)
     if cursor:
@@ -63,7 +88,7 @@ def search_transactions(
         where = f"{where} AND {keyset}" if where else f"WHERE {keyset}"
         params = [*params, d, d, i]
     sql = (
-        f"SELECT {_SELECT} FROM v_transactions {where} "
+        f"SELECT {_SELECT} FROM v_flows {where} "
         "ORDER BY date DESC, id DESC LIMIT ?"
     )
     cur = db.read()
@@ -72,12 +97,15 @@ def search_transactions(
     finally:
         cur.close()
     page = fetched[:limit]
-    rows = [_row(r) for r in page]
+    rows = [compact_row(_row(r)) for r in page]
     next_cursor = None
     if len(fetched) > limit:
         last = page[-1]
         next_cursor = encode_cursor(last[COLUMNS.index("date")], last[0])
-    return {"rows": rows, "next_cursor": next_cursor}
+    result = {"rows": rows, "next_cursor": next_cursor}
+    if clamped:
+        result["limit_clamped"] = True
+    return result
 
 
 def get_transactions(db: Database, ids: list[str]) -> list[dict]:
@@ -89,7 +117,7 @@ def get_transactions(db: Database, ids: list[str]) -> list[dict]:
     cur = db.read()
     try:
         fetched = cur.execute(
-            f"SELECT {_SELECT} FROM v_transactions WHERE id IN ({marks}) "
+            f"SELECT {_SELECT} FROM v_flows WHERE id IN ({marks}) "
             "ORDER BY date DESC, id DESC",
             list(ids),
         ).fetchall()

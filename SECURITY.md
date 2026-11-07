@@ -1,6 +1,6 @@
 # Security policy
 
-cashbook-mcp gives an AI assistant read access to a person's full financial history, so security reports are taken seriously.
+cashbook-mcp gives an AI assistant read access to a person's full financial history, and one narrow local write path (labels only), so security reports are taken seriously.
 This is a personal open-source project: responses are best effort, with no guaranteed timeline.
 
 ## Supported version
@@ -16,6 +16,7 @@ Use the repository's **Security** tab, then **Report a vulnerability** (GitHub p
 ## In scope
 
 - `query_sql` sandbox escapes: reading files, reaching the network, attaching databases, changing settings, writing data or exhausting memory
+- The reclassification write path: changing anything other than a transaction's kind, skipping the journal, the batch limit or the daily cap, or an undo that does not restore the previous state
 - Prompt-injection bypasses: transaction text that makes the assistant act against the owner's wishes; sanitizer or untrusted-marker bypasses
 - Authentication and allowlist flaws (`ALLOWED_EMAILS`, token handling, Google OAuth, admin sessions, CSRF, re-authentication)
 - Item validation bypasses on `/admin` (adding a Pluggy item that is not the owner's or not a MeuPluggy item)

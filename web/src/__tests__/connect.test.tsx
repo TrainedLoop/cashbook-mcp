@@ -61,6 +61,7 @@ const found = (item_id: string, bank: string, alias: string | null = null): Foun
 
 const conn = (alias: string): Connection => ({
   alias,
+  role: "personal",
   bank: "Meu Banco",
   status: "UPDATED",
   execution_status: "SUCCESS",
@@ -124,8 +125,8 @@ describe("connect with MeuPluggy", () => {
     m.connections.mockResolvedValue({ connections: [conn("inter")] });
     await user.click(screen.getByRole("button", { name: "Add 2 banks" }));
     await waitFor(() => expect(m.addConnection).toHaveBeenCalledTimes(2));
-    expect(m.addConnection).toHaveBeenNthCalledWith(1, "inter", "it1");
-    expect(m.addConnection).toHaveBeenNthCalledWith(2, "xp-invest", "it3");
+    expect(m.addConnection).toHaveBeenNthCalledWith(1, "inter", "it1", "personal");
+    expect(m.addConnection).toHaveBeenNthCalledWith(2, "xp-invest", "it3", "personal");
     expect(await screen.findByRole("heading", { name: "Connections" })).toBeInTheDocument();
   });
 
@@ -140,7 +141,7 @@ describe("connect with MeuPluggy", () => {
 
     await user.click(await screen.findByRole("checkbox", { name: "Connect XP" }));
     await user.click(screen.getByRole("button", { name: "Add 1 bank" }));
-    await waitFor(() => expect(m.addConnection).toHaveBeenCalledWith("caixa", "it2"));
+    await waitFor(() => expect(m.addConnection).toHaveBeenCalledWith("caixa", "it2", "personal"));
     expect(m.addConnection).toHaveBeenCalledTimes(1);
   });
 
@@ -207,7 +208,7 @@ describe("add existing item", () => {
     await user.click(screen.getByRole("button", { name: "Preview" }));
     expect(await screen.findByText("BANCO TESTE")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Add connection" }));
-    await waitFor(() => expect(m.addConnection).toHaveBeenCalledWith("main", "abc-123"));
+    await waitFor(() => expect(m.addConnection).toHaveBeenCalledWith("main", "abc-123", "personal"));
   });
 });
 

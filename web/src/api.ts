@@ -18,9 +18,13 @@ export interface Account {
   type: string;
   subtype: string | null;
   name: string;
+  purpose?: Purpose;
 }
+export type Role = "personal" | "business";
+export type Purpose = "regular" | "investment";
 export interface Connection {
   alias: string;
+  role: Role;
   bank: string | null;
   status: string | null;
   execution_status: string | null;
@@ -44,6 +48,7 @@ export interface ItemPreview {
   bank: string;
   status: string | null;
   accounts: { name: string; type: string | null; number: string | null }[];
+  suggested_role?: Role;
 }
 /** A preview from discover: `alias` when already connected, `error` when it cannot be added. */
 export interface FoundItem extends Omit<ItemPreview, "bank"> {
@@ -125,8 +130,16 @@ export const api = {
   preview: (itemId: string) => call<ItemPreview>("POST", "/admin/api/connections/preview", { item_id: itemId }),
   discover: (itemIds: string[]) =>
     call<{ items: FoundItem[] }>("POST", "/admin/api/connections/discover", { item_ids: itemIds }),
-  addConnection: (alias: string, itemId: string) =>
-    call<{ alias: string; started: boolean }>("POST", "/admin/api/connections", { alias, item_id: itemId }),
+  addConnection: (alias: string, itemId: string, role?: Role) =>
+    call<{ alias: string; started: boolean }>("POST", "/admin/api/connections", {
+      alias,
+      item_id: itemId,
+      ...(role ? { role } : {}),
+    }),
+  setRole: (alias: string, role: Role) =>
+    call<{ alias: string; role: Role }>("PATCH", `/admin/api/connections/${enc(alias)}`, { role }),
+  setPurpose: (accountId: string, purpose: Purpose) =>
+    call<{ account_id: string; purpose: Purpose }>("PATCH", `/admin/api/accounts/${enc(accountId)}`, { purpose }),
   reload: (alias?: string) =>
     call<{ started: boolean }>("POST", alias ? `/admin/api/connections/${enc(alias)}/reload` : "/admin/api/reload"),
   disconnectImpact: (alias: string) =>
@@ -197,6 +210,8 @@ const MESSAGES: Record<string, string> = {
   item_taken: "That item is already connected.",
   pluggy_unavailable: "Pluggy is unavailable right now. Try again in a moment.",
   reload_in_progress: "A reload is already running.",
+  role_invalid: "That role is not valid.",
+  purpose_invalid: "That account type is not valid.",
   not_found: "That connection no longer exists.",
   csrf: "Your session looks out of date. Reload the page and try again.",
   reauth_required: "Redirecting to Google to confirm it is you...",

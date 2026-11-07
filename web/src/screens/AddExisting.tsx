@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ALIAS_HINT, api, errorMessage, normalizeAlias, type ItemPreview } from "../api";
+import { ALIAS_HINT, api, errorMessage, normalizeAlias, type ItemPreview, type Role } from "../api";
 
 interface Props {
   onDone: () => void;
@@ -10,6 +10,7 @@ export default function AddExisting({ onDone, onCancel }: Props) {
   const [rawAlias, setRawAlias] = useState("");
   const [itemId, setItemId] = useState("");
   const [preview, setPreview] = useState<ItemPreview | null>(null);
+  const [role, setRole] = useState<Role>("personal");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -30,14 +31,18 @@ export default function AddExisting({ onDone, onCancel }: Props) {
       setError(ALIAS_HINT);
       return;
     }
-    return run(async () => setPreview(await api.preview(itemId.trim())));
+    return run(async () => {
+      const p = await api.preview(itemId.trim());
+      setPreview(p);
+      setRole(p.suggested_role ?? "personal");
+    });
   }
 
   const doAdd = () =>
     run(async () => {
       const alias = normalizeAlias(rawAlias);
       if (!alias || !preview) return;
-      await api.addConnection(alias, preview.item_id);
+      await api.addConnection(alias, preview.item_id, role);
       onDone();
     });
 
@@ -79,6 +84,13 @@ export default function AddExisting({ onDone, onCancel }: Props) {
               <li key={i}>{a.name}{a.number ? ` (${a.number})` : ""}</li>
             ))}
           </ul>
+          <label className="field">
+            <span>Role</span>
+            <select value={role} onChange={(e) => setRole(e.target.value as Role)}>
+              <option value="personal">Personal</option>
+              <option value="business">Business</option>
+            </select>
+          </label>
         </div>
       )}
       <div className="actions">

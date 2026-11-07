@@ -148,3 +148,28 @@ def test_bank_foreign_original_amount_keeps_bank_sign():
     t = tx(snapshot([extra]), "tx-bank-fx")
     assert (t.amount, t.currency) == (Decimal("-110.00"), "BRL")
     assert t.original_amount == Decimal("-20.00")
+
+
+def test_normalize_card_installments():
+    base = {
+        "id": "tx-inst-1",
+        "accountId": "acc-credit-1",
+        "date": "2026-02-15T00:00:00.000Z",
+        "description": "Store",
+        "amount": 50,
+        "currencyCode": "BRL",
+    }
+    meta = {
+        "billId": "b",
+        "installmentNumber": 3,
+        "totalInstallments": 10,
+        "purchaseDate": "2026-01-15T00:00:00.000Z",
+    }
+    s = snapshot([{**base, "creditCardMetadata": meta}, {**base, "id": "tx-inst-2"}])
+    t = tx(s, "tx-inst-1")
+    assert (t.installment_number, t.installment_total) == (3, 10)
+    assert t.purchase_date == date(2026, 1, 15)
+    plain = tx(s, "tx-inst-2")
+    assert plain.installment_number is None
+    assert plain.installment_total is None
+    assert plain.purchase_date is None

@@ -92,3 +92,14 @@ def test_list_connections_timestamps_carry_utc_offset(db):
     assert main["last_synced_at"] == "2026-03-31T09:00:00+00:00"
     assert main["last_updated_at"] == "2026-03-31T08:00:00+00:00"
     assert main["consent_expires_at"] == "2026-09-01T00:00:00+00:00"
+
+
+def test_list_connections_has_role_and_account_purpose(db):
+    with db.write() as cur:
+        cur.execute("UPDATE connections SET role = 'business' WHERE alias = 'second'")
+        cur.execute("INSERT INTO account_settings VALUES ('acc-main', 'main', 'investment')")
+    out = {c["alias"]: c for c in list_connections(db)}
+    assert out["main"]["role"] == "personal"
+    assert out["second"]["role"] == "business"
+    purposes = {a["id"]: a["purpose"] for a in out["main"]["accounts"]}
+    assert purposes == {"acc-main": "investment", "card-main": "regular"}

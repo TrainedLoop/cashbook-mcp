@@ -1,5 +1,6 @@
 import json
 from datetime import time
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -17,6 +18,8 @@ def test_defaults():
     assert s.refresh_at == time(6, 0)
     assert s.tz.key == "America/Sao_Paulo"
     assert s.history_months == 12
+    assert s.max_reclassify_per_day == 1000
+    assert s.review_min_amount == Decimal("500.00")
     assert s.db_path == Path("/data/cashbook.duckdb")
     assert s.secrets_dir == Path("/secrets")
     assert s.allowed_redirect_uris == (
@@ -34,6 +37,11 @@ def test_defaults():
         ({"ALLOWED_EMAILS": ""}, "ALLOWED_EMAILS"),
         ({"PUBLIC_URL": None}, "PUBLIC_URL"),
         ({"PORT": "abc"}, "PORT"),
+        ({"MAX_RECLASSIFY_PER_DAY": "0"}, "MAX_RECLASSIFY_PER_DAY"),
+        ({"MAX_RECLASSIFY_PER_DAY": "x"}, "MAX_RECLASSIFY_PER_DAY"),
+        ({"REVIEW_MIN_AMOUNT": "-1"}, "REVIEW_MIN_AMOUNT"),
+        ({"REVIEW_MIN_AMOUNT": "abc"}, "REVIEW_MIN_AMOUNT"),
+        ({"REVIEW_MIN_AMOUNT": "NaN"}, "REVIEW_MIN_AMOUNT"),
         ({"ALLOWED_REDIRECT_URIS": "https://*.example.com/cb"}, "ALLOWED_REDIRECT_URIS"),
         ({"ALLOWED_REDIRECT_URIS": " "}, "ALLOWED_REDIRECT_URIS"),
     ],
@@ -85,3 +93,9 @@ def test_secrets_repr_hides_values():
     for v in values:
         assert v not in repr(s)
         assert v not in str(s)
+
+
+def test_reclassify_and_review_settings_parse():
+    s = Settings.from_env({**BASE, "MAX_RECLASSIFY_PER_DAY": "5", "REVIEW_MIN_AMOUNT": "0"})
+    assert s.max_reclassify_per_day == 5
+    assert s.review_min_amount == Decimal(0)

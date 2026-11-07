@@ -98,6 +98,9 @@ def _transaction(alias: str, account: Account, t: dict) -> Transaction:
         merchant_name=merchant.get("businessName") or merchant.get("name"),
         pluggy_category=t.get("category"),
         bill_id=card_meta.get("billId"),
+        installment_number=card_meta.get("installmentNumber"),
+        installment_total=card_meta.get("totalInstallments"),
+        purchase_date=_date(card_meta.get("purchaseDate")),
     )
 
 

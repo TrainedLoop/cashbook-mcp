@@ -7,7 +7,12 @@ from decimal import Decimal
 from typing import Any, Literal
 from zoneinfo import ZoneInfo
 
+from .metrics import Scope, scope_clause
+
 INTERNAL_KINDS = ("internal_transfer", "card_bill_payment")
+# With a scope, internal movements are excluded by flow, so transfers between personal
+# and business (owner draws, contributions) stay visible as money in or out of the scope.
+_INTERNAL_FLOWS = {"internal_transfer": "internal", "card_bill_payment": "card_payment"}
 UNCATEGORIZED = "uncategorized"
 # Money is only summed in this currency; rows in any other are counted apart.
 BASE_CURRENCY = "BRL"
@@ -26,6 +31,7 @@ class TxFilters:
     max_amount: Decimal | None = None
     direction: Literal["in", "out"] | None = None
     exclude_internal: bool = True
+    scope: Scope | None = None
 
 
 def today_in(tz: ZoneInfo, now: datetime) -> date:
@@ -91,11 +97,22 @@ def where_clause(f: TxFilters) -> tuple[str, list]:
         clauses.append("amount > 0")
     elif f.direction == "out":
         clauses.append("amount < 0")
+    if f.scope is not None:
+        clause, cparams = scope_clause(f.scope)
+        if clause:
+            clauses.append(clause)
+            params.extend(cparams)
     # Kinds the caller asked for by name are never excluded.
     excluded = [k for k in INTERNAL_KINDS if k not in (f.kinds or ())]
     if f.exclude_internal and excluded:
-        clauses.append(f"kind NOT IN ({', '.join('?' * len(excluded))})")
-        params.extend(excluded)
+        marks = ", ".join("?" * len(excluded))
+        if f.scope is None:
+            clauses.append(f"kind NOT IN ({marks})")
+            params.extend(excluded)
+        else:
+            # Foreign rows keep flow 'foreign': their internal kinds stay excluded by kind.
+            clauses.append(f"NOT (flow IN ({marks}) OR (flow = 'foreign' AND kind IN ({marks})))")
+            params.extend([_INTERNAL_FLOWS[k] for k in excluded] + excluded)
     return (("WHERE " + " AND ".join(clauses)) if clauses else ""), params
 
 

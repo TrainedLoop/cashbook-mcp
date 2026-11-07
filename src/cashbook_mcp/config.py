@@ -6,6 +6,7 @@ import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import time
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlsplit
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -36,6 +37,8 @@ class Settings:
     tz: ZoneInfo
     history_months: int
     log_level: str
+    max_reclassify_per_day: int = 1000
+    review_min_amount: Decimal = Decimal("500.00")
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] = os.environ) -> "Settings":
@@ -48,6 +51,9 @@ class Settings:
         history_months = _int(env, "HISTORY_MONTHS", 12)
         if history_months < 1:
             raise ConfigError(f"HISTORY_MONTHS must be a positive integer, got {history_months!r}")
+        max_reclassify = _int(env, "MAX_RECLASSIFY_PER_DAY", 1000)
+        if max_reclassify < 1:
+            raise ConfigError(f"MAX_RECLASSIFY_PER_DAY must be a positive integer, got {max_reclassify!r}")
         return cls(
             public_url=public_url,
             allowed_emails=emails,
@@ -59,6 +65,8 @@ class Settings:
             tz=_tz(env.get("TZ") or "America/Sao_Paulo"),
             history_months=history_months,
             log_level=(env.get("LOG_LEVEL") or "INFO").strip().upper(),
+            max_reclassify_per_day=max_reclassify,
+            review_min_amount=_decimal(env, "REVIEW_MIN_AMOUNT", Decimal("500.00")),
         )
 
 
@@ -120,6 +128,19 @@ def _int(env: Mapping[str, str], name: str, default: int) -> int:
         return int(raw)
     except ValueError:
         raise ConfigError(f"{name} must be an integer, got {raw!r}") from None
+
+
+def _decimal(env: Mapping[str, str], name: str, default: Decimal) -> Decimal:
+    raw = env.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = Decimal(raw.strip())
+    except InvalidOperation:
+        raise ConfigError(f"{name} must be a decimal number, got {raw!r}") from None
+    if not value.is_finite() or value < 0:
+        raise ConfigError(f"{name} must be a number >= 0, got {raw!r}")
+    return value
 
 
 def _refresh_at(raw: str) -> time:

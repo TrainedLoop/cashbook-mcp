@@ -71,12 +71,14 @@ class FakeSyncer:
         self.aliases: dict[str, str] = {"main": "item-1", "second": "item-2"}
         self.errors: dict[str, Exception] = {}
         self.calls: list[tuple] = []
+        self.roles: dict[str, str | None] = {}
         self.release = threading.Event()
         self.release.set()
         self.loads_started = threading.Event()
         self.preview_result = ItemPreview(
             item_id="item-9", bank="Banco Teste", status="UPDATED",
             accounts=[{"name": "Checking", "type": "BANK", "number": "****2345"}],
+            suggested_role="personal",
         )  # fmt: skip
 
     def _maybe_fail(self, name: str) -> None:
@@ -92,8 +94,11 @@ class FakeSyncer:
         self._maybe_fail("preview")
         return self.preview_result
 
-    async def add_connection(self, alias: str, item_id: str, *, load: bool = True) -> Connection:
+    async def add_connection(
+        self, alias: str, item_id: str, *, role: str | None = None, load: bool = True
+    ) -> Connection:
         self.calls.append(("add_connection", alias, item_id, load))
+        self.roles[alias] = role
         self._maybe_fail("add_connection")
         self.aliases[alias] = item_id
         if load:
@@ -114,6 +119,14 @@ class FakeSyncer:
         self.calls.append(("disconnect", alias))
         self._maybe_fail("disconnect")
         self.aliases.pop(alias, None)
+
+    def set_role(self, alias: str, role: str) -> None:
+        self.calls.append(("set_role", alias, role))
+        self._maybe_fail("set_role")
+
+    def set_purpose(self, account_id: str, purpose: str) -> None:
+        self.calls.append(("set_purpose", account_id, purpose))
+        self._maybe_fail("set_purpose")
 
     def disconnect_impact(self, alias: str) -> DisconnectImpact:
         self.calls.append(("disconnect_impact", alias))

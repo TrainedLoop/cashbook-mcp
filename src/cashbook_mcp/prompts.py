@@ -93,3 +93,40 @@ Steps:
 
 {SAFETY}
 """
+
+
+def review_classifications() -> str:
+    return f"""Help me review the transactions the server could not classify with confidence.
+
+Steps:
+1. Call review_classification() to get the queue: groups of transactions by counterpart, each with a
+   reason, a total and, when I changed the same counterpart before, a hint with the kinds I used.
+2. Go through the groups one at a time, largest first. For each, tell me who the counterpart is, the
+   transactions (date, amount, account) and the reason it is unclear, and ask me what it really is.
+   A hint is only a suggestion from my earlier changes: never apply it without my answer.
+3. Only for what I confirmed, call reclassify_transactions(ids=[...], kind=...) with the transaction ids of
+   that group and a short note. Leave anything I did not confirm or am unsure about untouched.
+4. At the end report each change_id, the kind, the number of transactions changed and what was left out.
+   Any batch can be undone with undo_reclassification(change_id=...).
+
+{SAFETY}
+"""
+
+
+def weekly_review() -> str:
+    return f"""Run my weekly finance review.
+
+Steps:
+1. Call finance_overview() for balances, card limits, upcoming bills and connection problems.
+2. Call cash_forecast(days=30) and note the lowest projected balance, the date the balance would go
+   negative (if any) and the largest upcoming outflows.
+3. Call recurring_changes() for price increases, new or stopped recurring charges and duplicate charges.
+   Use get_transactions(ids=[...]) with their evidence_ids when a change needs a closer look.
+4. Call review_classification() for transactions the server could not classify with confidence.
+5. Summarize the week: where I stand, what is coming in the next 30 days, and what changed. Then list the
+   questions for me, one per item: each change in recurring charges (is it expected?), each group in the
+   classification queue (what is it really?) and any bank that needs attention. Do not reclassify
+   anything until I answer.
+
+{SAFETY}
+"""

@@ -200,7 +200,7 @@ def test_views_exclude_removed(db):
     cur = db.read()
     ids = [r[0] for r in cur.execute("SELECT id FROM v_transactions ORDER BY id").fetchall()]
     assert ids == ["t1", "t3", "t4", "t5", "t6", "t7"]
-    spend = [r[0] for r in cur.execute("SELECT id FROM v_spending ORDER BY id").fetchall()]
+    spend = [r[0] for r in cur.execute("SELECT id FROM v_flows WHERE flow = 'spending' ORDER BY id").fetchall()]
     assert spend == ["t1", "t7"]
     assert cur.execute("SELECT id FROM v_accounts").fetchall() == [("a1",)]
     reasons = cur.execute("SELECT suspicion_reasons FROM transactions WHERE id='t1'").fetchone()
@@ -211,7 +211,7 @@ def test_all_views_exist(db):
     cur = db.read()
     for view in [
         "v_accounts", "v_transactions", "v_bills", "v_investments",
-        "v_investment_transactions", "v_loans", "v_spending",
+        "v_investment_transactions", "v_loans", "v_flows",
     ]:
         assert cur.execute(f"SELECT count(*) FROM {view}").fetchone() == (0,)
 
@@ -232,3 +232,28 @@ def test_open_disables_extension_autoload(db):
     cur = db.read()
     for name in ("autoinstall_known_extensions", "autoload_known_extensions"):
         assert cur.execute(f"SELECT current_setting('{name}')").fetchone() == (False,)
+
+
+def test_v02_schema_present(db):
+    assert db.schema_version() >= 2
+    cur = db.read()
+    try:
+        tables = {r[0] for r in cur.execute("SELECT table_name FROM information_schema.tables").fetchall()}
+        assert {
+            "account_settings",
+            "balance_snapshots",
+            "investment_snapshots",
+            "classification_changes",
+            "classification_overrides",
+        } <= tables
+        tx_cols = {r[0] for r in cur.execute("DESCRIBE transactions").fetchall()}
+        assert {"installment_number", "installment_total", "purchase_date"} <= tx_cols
+    finally:
+        cur.close()
+    with db.write() as cur:
+        insert_connection(cur)
+        assert cur.execute("SELECT role FROM connections").fetchone() == ("personal",)
+    with pytest.raises(duckdb.ConstraintException), db.write() as cur:
+        cur.execute("UPDATE connections SET role = 'other'")
+    with pytest.raises(duckdb.ConstraintException), db.write() as cur:
+        cur.execute("INSERT INTO account_settings VALUES ('a', 'main', 'bogus')")

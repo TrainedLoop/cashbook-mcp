@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, date, datetime
+from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -322,6 +323,26 @@ async def test_disconnect_deletes_all_alias_rows(syncer, fake, db):
     assert [c.alias for c in syncer.connections()] == ["b"]
 
 
+async def test_disconnect_reclassifies_the_other_connections(syncer, fake, db):
+    fake.add_item("item-a")
+    fake.add_item("item-b")
+    fake.transactions["item-a-bank"].append(
+        {"id": "out", "date": iso("2026-10-01"), "amount": -500.0, "description": "Transfer out",
+         "currencyCode": "BRL", "category": "Transfers"}
+    )
+    fake.add_tx("item-b-bank", "in", "2026-10-01", amount=500.0)
+    await syncer.add_connection("a", "item-a")
+    await syncer.add_connection("b", "item-b")
+    assert rows(db, "SELECT kind, kind_reason FROM transactions WHERE id = 'in'") == [
+        ("internal_transfer", "paired_with:out")
+    ]
+
+    await syncer.disconnect("a")
+
+    # The paired side is gone, so the remaining one no longer points at it.
+    assert rows(db, "SELECT kind, kind_reason FROM transactions WHERE id = 'in'") == [("income", "sign")]
+
+
 async def test_disconnect_during_load_discards(syncer, fake, db):
     fake.add_item("item-a")
     fake.add_tx("item-a-bank", "tx-a", "2026-10-01")
@@ -455,3 +476,150 @@ async def test_add_connection_without_load_stores_only_the_connection(syncer, fa
     assert alias_counts(db, "a")["connections"] == 1
     assert (await syncer.load("a")).outcome == "ok"
     assert alias_counts(db, "a")["transactions"] == 1
+
+
+async def test_add_connection_suggests_business_for_cnpj(syncer, fake):
+    fake.add_item("item-a")
+    fake.accounts["item-a"][0]["taxNumber"] = {"type": "CNPJ", "value": "11.222.333/0001-81"}
+    fake.add_item("item-b")
+    fake.add_item("item-c")
+    fake.accounts["item-c"][0]["taxNumber"] = "11222333000181"
+
+    assert (await syncer.preview("item-a")).suggested_role == "business"
+    assert (await syncer.preview("item-b")).suggested_role == "personal"
+    assert (await syncer.add_connection("a", "item-a")).role == "business"
+    assert (await syncer.add_connection("b", "item-b")).role == "personal"
+    assert (await syncer.add_connection("c", "item-c", role="personal")).role == "personal"
+
+
+def test_suggest_role_ignores_cards_and_cpf():
+    from cashbook_mcp.store.sync import suggest_role
+
+    cnpj = "11222333000181"
+    assert suggest_role([{"type": "CREDIT", "taxNumber": cnpj}]) == "personal"
+    assert suggest_role([{"type": "BANK", "taxNumber": "11122233344"}]) == "personal"
+    assert suggest_role([{"type": "BANK"}]) == "personal"
+    assert suggest_role([{"type": "BANK", "taxNumber": cnpj}]) == "business"
+
+
+async def test_set_role(syncer, fake):
+    fake.add_item("item-a")
+    await syncer.add_connection("a", "item-a", load=False)
+
+    syncer.set_role("a", "business")
+
+    assert syncer.connections()[0].role == "business"
+    with pytest.raises(ValidationError) as e:
+        syncer.set_role("a", "other")
+    assert e.value.code == "role_invalid"
+    with pytest.raises(LookupError):
+        syncer.set_role("zzz", "business")
+
+
+async def test_load_writes_daily_snapshots(syncer, fake, db, clock):
+    fake.add_item("item-a")
+    await syncer.add_connection("a", "item-a")
+    fake.accounts["item-a"][0]["balance"] = 250.0
+    fake.investments["item-a"][0]["balance"] = 1100.0
+    await syncer.load("a")
+
+    assert rows(db, "SELECT day, account_id, alias, balance, currency FROM balance_snapshots "
+                    "ORDER BY account_id") == [
+        (date(2026, 11, 6), "item-a-bank", "a", Decimal("250.00"), "BRL"),
+        (date(2026, 11, 6), "item-a-card", "a", Decimal("-50.00"), "BRL"),
+    ]
+    assert rows(db, "SELECT day, investment_id, balance FROM investment_snapshots") == [
+        (date(2026, 11, 6), "item-a-inv-1", Decimal("1100.00"))
+    ]
+
+    clock.value = datetime(2026, 11, 7, 15, 0, tzinfo=UTC)
+    await syncer.load("a")
+    assert rows(db, "SELECT count(*), count(DISTINCT day) FROM balance_snapshots") == [(4, 2)]
+    assert rows(db, "SELECT count(*) FROM investment_snapshots") == [(2,)]
+
+
+async def test_snapshot_day_uses_the_configured_timezone(syncer, fake, db, clock):
+    fake.add_item("item-a")
+    clock.value = datetime(2026, 11, 7, 1, 0, tzinfo=UTC)  # still Nov 6 in Sao Paulo
+    await syncer.add_connection("a", "item-a")
+
+    assert rows(db, "SELECT DISTINCT day FROM balance_snapshots") == [(date(2026, 11, 6),)]
+
+
+async def test_failed_load_writes_no_snapshot(syncer, fake, db):
+    fake.add_item("item-a")
+    await syncer.add_connection("a", "item-a", load=False)
+    fake.fail.add("item-a")
+
+    result = await syncer.load("a")
+
+    assert result.outcome == "error"
+    assert rows(db, "SELECT count(*) FROM balance_snapshots") == [(0,)]
+    assert rows(db, "SELECT count(*) FROM investment_snapshots") == [(0,)]
+
+
+async def test_disconnect_deletes_snapshots_settings_and_overrides(syncer, fake, db):
+    fake.add_item("item-a")
+    fake.add_item("item-b")
+    await syncer.add_connection("a", "item-a")
+    await syncer.add_connection("b", "item-b")
+    syncer.set_purpose("item-a-bank", "investment")
+    syncer.set_purpose("item-b-bank", "investment")
+    with db.write() as cur:
+        cur.execute(
+            "INSERT INTO classification_changes VALUES ('c1', TIMESTAMP '2026-11-06 10:00:00', "
+            "'expense', NULL, 2, NULL)"
+        )
+        cur.execute("INSERT INTO classification_overrides VALUES ('t-a', 'a', 'expense', 'c1')")
+        cur.execute("INSERT INTO classification_overrides VALUES ('t-b', 'b', 'expense', 'c1')")
+
+    await syncer.disconnect("a")
+
+    for table in ("balance_snapshots", "investment_snapshots", "account_settings",
+                  "classification_overrides"):
+        assert rows(db, f"SELECT count(*) FROM {table} WHERE alias = 'a'") == [(0,)], table
+        assert rows(db, f"SELECT count(*) FROM {table} WHERE alias = 'b'")[0][0] >= 1, table
+    assert rows(db, "SELECT count(*) FROM classification_changes") == [(1,)]
+
+
+async def test_set_purpose_upserts_and_deletes_regular(syncer, fake, db):
+    fake.add_item("item-a")
+    await syncer.add_connection("a", "item-a")
+
+    syncer.set_purpose("item-a-bank", "investment")
+    assert rows(db, "SELECT account_id, alias, purpose FROM account_settings") == [
+        ("item-a-bank", "a", "investment")
+    ]
+    syncer.set_purpose("item-a-bank", "regular")
+    assert rows(db, "SELECT count(*) FROM account_settings") == [(0,)]
+
+    with pytest.raises(ValidationError) as e:
+        syncer.set_purpose("item-a-bank", "other")
+    assert e.value.code == "purpose_invalid"
+    with pytest.raises(LookupError):
+        syncer.set_purpose("missing", "investment")
+    with db.write() as cur:
+        cur.execute("UPDATE accounts SET removed_at = TIMESTAMP '2026-11-06 10:00:00'")
+    with pytest.raises(LookupError):
+        syncer.set_purpose("item-a-bank", "investment")
+
+
+async def test_set_purpose_rejects_card_accounts(syncer, fake, db):
+    fake.add_item("item-a")
+    await syncer.add_connection("a", "item-a")
+    for purpose in ("investment", "regular"):
+        with pytest.raises(ValidationError) as e:
+            syncer.set_purpose("item-a-card", purpose)
+        assert e.value.code == "purpose_invalid"
+    assert rows(db, "SELECT count(*) FROM account_settings") == [(0,)]
+
+
+async def test_set_purpose_reclassifies(syncer, fake, db):
+    fake.add_item("item-a")
+    fake.add_tx("item-a-bank", "tx-1", "2026-10-01", amount=-40.0)
+    await syncer.add_connection("a", "item-a")
+    before = rows(db, "SELECT kind, kind_reason FROM transactions WHERE id = 'tx-1'")
+
+    syncer.set_purpose("item-a-bank", "investment")
+
+    assert rows(db, "SELECT kind, kind_reason FROM transactions WHERE id = 'tx-1'") != before

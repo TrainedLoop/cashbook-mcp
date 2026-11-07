@@ -461,7 +461,11 @@ def create_mcp(
 
     @mcp.tool(annotations=WRITE, description=(
         "Change the kind and/or the category of up to 200 transactions (kind: one of the listed values, see "
-        "describe_schema; category: one of the valid categories, case-insensitive). Give at least one. Changes "
+        "describe_schema; category: one of the valid categories, case-insensitive). Give at least one. "
+        "Effect of each kind on totals: counts as spending: purchase, fee, loan, other; counts as income: income; "
+        "reduces spending (in its own category): refund; left out of income and spending: internal_transfer, "
+        "card_bill_payment, investment; reported apart, never in monthly spending or income: one_off (manual "
+        "only; for one-off large expenses or asset purchases). Changes "
         "only the local label in this store, never the bank. A category changes only the label used by groupings "
         "and filters (summaries, list_categories), never the kind or the totals; a category override does not "
         "change how the kind is classified. Categories must come from the valid list: the categories in use "

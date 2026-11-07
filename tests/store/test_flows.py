@@ -92,6 +92,12 @@ CASES = [
      ("from_business", D(0), D(0), "business")),
     ("to_pers", "ba", "-200.00", "internal_transfer", "paired_with:from_biz", "BRL",
      ("to_personal", D(0), D(0), "personal")),
+    ("in_pur", "pa", "4.00", "purchase", "sign", "BRL", ("refund", D("-4.00"), D(0), None)),
+    ("in_fee", "pa", "2.00", "fee", "sign", "BRL", ("refund", D("-2.00"), D(0), None)),
+    ("in_oth", "pa", "1.00", "other", "sign", "BRL", ("refund", D("-1.00"), D(0), None)),
+    ("in_loan", "pa", "500.00", "loan", "sign", "BRL", ("internal", D(0), D(0), None)),
+    ("out_inc", "pa", "-9.00", "income", "manual:1", "BRL", ("spending", D("9.00"), D(0), None)),
+    ("out_ref", "pc", "-7.00", "refund", "manual:1", "BRL", ("spending", D("7.00"), D(0), None)),
     ("foreign_out", "pa", "-30.00", "purchase", "sign", "USD", ("foreign", D(0), D(0), None)),
     ("foreign_xfer", "pa", "-30.00", "internal_transfer", "counterpart_is_own_account:biz",
      "USD", ("foreign", D(0), D(0), "business")),
@@ -107,6 +113,8 @@ def test_flow_values(db):
     for tid, *_, expected in CASES:
         assert got[tid] == expected, tid
     assert set(got) == {c[0] for c in CASES}
+    cur = db.read()
+    assert cur.execute("SELECT count(*) FROM v_flows WHERE flow IS NULL").fetchone() == (0,)
 
 
 def test_peer_role_by_reason(db):

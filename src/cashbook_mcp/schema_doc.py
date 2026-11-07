@@ -61,7 +61,9 @@ _FLOW_DOCS = {
     "flow": "Where the money went: income, spending, refund, from_business, to_business, "
     "from_personal, to_personal (transfers between personal and business connections, by "
     "direction), internal, investment, card_payment, or foreign (currency is not BRL, "
-    "counted apart). Null for an inflow of kind purchase, fee, loan or other.",
+    "counted apart). Never null. Outflows are spending, whatever the kind (even income or "
+    "refund); inflows of kind purchase, fee or other are refund (they reduce spending); "
+    "inflows of kind loan are internal.",
     "spend_amount": "Contribution to spending: -amount for spending outflows, -amount "
     "(negative) for refunds, else 0.",
     "income_amount": "amount for income rows, else 0.",

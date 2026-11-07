@@ -61,12 +61,16 @@ flowed AS (
                     WHEN amount < 0 THEN 'to_personal'
                     ELSE 'from_personal'
                 END
-            WHEN kind = 'income' THEN 'income'
-            WHEN kind = 'refund' THEN 'refund'
             WHEN kind = 'investment' THEN 'investment'
             WHEN kind = 'card_bill_payment' THEN 'card_payment'
             WHEN kind = 'internal_transfer' THEN 'internal'
-            WHEN kind IN ('purchase', 'fee', 'loan', 'other') AND amount < 0 THEN 'spending'
+            -- Every other outflow is spending, including a reversed income or refund.
+            WHEN amount < 0 THEN 'spending'
+            WHEN kind = 'income' THEN 'income'
+            -- Borrowed money is neither income nor spending.
+            WHEN kind = 'loan' THEN 'internal'
+            -- Remaining inflows (refund, purchase, fee, other) reduce spending.
+            ELSE 'refund'
         END AS flow
     FROM peered
 )

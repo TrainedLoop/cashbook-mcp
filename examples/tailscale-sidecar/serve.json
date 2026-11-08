@@ -5,7 +5,7 @@
   "Web": {
     "${TS_CERT_DOMAIN}:443": {
       "Handlers": {
-        "/": { "Proxy": "http://cashbook:8743" }
+        "/": { "Proxy": "http://cashbook-app:8743" }
       }
     }
   },

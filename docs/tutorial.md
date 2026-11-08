@@ -46,8 +46,6 @@ docker run --rm -v "$PWD/data:/data" -v "$PWD/secrets:/secrets" \
 
 `pluggy.json` and `google-oauth.json` must already be in `secrets/`. `init` generates `secrets/db.key` and `secrets/session.key` when missing, checks the Pluggy credentials with `POST /auth`, and creates or migrates the database. It needs `secrets/` writable (the compose file mounts it read-only for the server), so run it as above, or on a checkout with `uv run cashbook-admin init --secrets ./secrets --db ./data/cashbook.duckdb`. The container user is uid 10001, which is why `data` and `secrets` are chowned to it before `init` runs.
 
-Before the first release is published, build the image locally instead of pulling it: `docker build -t ghcr.io/trainedloop/cashbook-mcp:0.2 .` (compose then uses that tag).
-
 ## 5. Start the server
 
 ```bash

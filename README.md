@@ -62,10 +62,6 @@ docker run --rm -v "$PWD/data:/data" -v "$PWD/secrets:/secrets" \
 docker compose up -d
 ```
 
-> **Before the first release** the image is not published yet. Build it from this checkout with
-> `docker build -t cashbook-mcp:dev .`, use `cashbook-mcp:dev` in place of `ghcr.io/trainedloop/cashbook-mcp:0.2`
-> above, and point `image:` in `docker-compose.yml` at it.
-
 Upgrading from 0.1 recreates the store; see "Upgrading from 0.1" in the [tutorial](docs/tutorial.md).
 
 [examples/tailscale-sidecar/](examples/tailscale-sidecar/) shows a deployment with a Tailscale sidecar: its own hostname on port 443, no port published on the host, and a firewall unit that isolates the container. [ROADMAP.md](ROADMAP.md) lists planned work.

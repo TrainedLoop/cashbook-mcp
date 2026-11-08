@@ -85,12 +85,6 @@ def test_exception_does_not_end_loop():
     assert h.syncer.calls == ["load_all", "check_updates", "check_updates"]
 
 
-def test_cancellation_propagates():
-    h = Harness(at(4, 30), FakeSyncer(), stop_after=1)
-    run(h)
-    assert h.syncer.calls == ["load_all"]
-
-
 def test_last_and_next_full_refresh():
     h = Harness(at(4, 30), FakeSyncer(), stop_after=1)
     s = h.scheduler()

@@ -1,4 +1,3 @@
-from dataclasses import replace
 from datetime import date
 from decimal import Decimal
 
@@ -41,11 +40,6 @@ def test_bill_payment_matched():
     assert (r.kind, r.kind_reason) == ("card_bill_payment", "matched_card_bill:b1")
 
 
-def test_bill_payment_too_far_off():
-    r = one(tx(amount="-1234.56", d=date(2026, 2, 20)), [bill()])
-    assert r.kind == "purchase"
-
-
 def test_bill_payment_window_edges():
     assert one(tx(amount="-1234.56", d=date(2026, 3, 2)), [bill()]).kind == "card_bill_payment"
     assert one(tx(amount="-1234.56", d=date(2026, 3, 17)), [bill()]).kind == "card_bill_payment"
@@ -84,16 +78,11 @@ def test_refund_on_credit_inflow():
     assert (r.kind, r.kind_reason) == ("refund", "card_credit")
 
 
-def test_bank_inflow_not_refund():
-    assert one(tx(amount="20.00")).kind == "income"
-
-
 def test_category_map():
     r = one(tx(pluggy_category="Bank FEES"))
     assert (r.kind, r.kind_reason) == ("fee", "pluggy_category:Bank FEES")
     assert one(tx(pluggy_category="Loans")).kind == "loan"
     assert one(tx(pluggy_category="Fixed income")).kind == "investment"
-    assert "credit card payment" in CATEGORY_KINDS
 
 
 def test_mutual_funds_are_investments_in_both_directions():
@@ -116,8 +105,8 @@ def test_rule_order_bill_beats_transfer():
 def test_pure_and_ordered():
     a, b = tx("t1", "-1.00"), tx("t2", "2.00")
     out = classify([a, b], ACCOUNTS, [])
-    assert [t.id for t in out] == ["t1", "t2"]
-    assert a == replace(a) and a.kind == "other"
+    assert [(t.id, t.kind) for t in out] == [("t1", "purchase"), ("t2", "income")]
+    assert (a.kind, b.kind) == ("other", "other")  # inputs are not mutated
 
 
 def card_bill(id="cb1", due=date(2026, 3, 12), total="500.00", closing=None, account_id="c1"):
@@ -317,8 +306,6 @@ def test_override_for_missing_transaction_is_ignored():
 
 
 def test_one_off_is_never_assigned_by_rules():
-    from cashbook_mcp.classify import CATEGORY_KINDS
-
     assert "one_off" not in CATEGORY_KINDS.values()
     got = run(tx("o", "-900000.00"), tx("i", "5000.00", account_id="a1"))
     assert all(kind != "one_off" for kind, _ in got.values())

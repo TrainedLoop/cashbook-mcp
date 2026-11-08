@@ -23,42 +23,32 @@ function callFor(method: string, url: string) {
 }
 
 describe("api CSRF", () => {
-  it("sends X-CSRF-Token on POST", async () => {
+  it("sends X-CSRF-Token on every mutation and not on GET", async () => {
     await api.connectToken();
     const init = callFor("POST", "/admin/api/connect-token");
-    expect((init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("tok123");
     expect(init.body).toBeUndefined();
     expect(init.credentials).toBe("same-origin");
-  });
-
-  it("sends X-CSRF-Token on DELETE", async () => {
     await api.disconnect("nubank");
-    const init = callFor("DELETE", "/admin/api/connections/nubank");
-    expect((init.headers as Record<string, string>)["X-CSRF-Token"]).toBe("tok123");
-  });
-
-  it("sends it on reload, add and preview, and does not send it on GET", async () => {
     await api.reload();
     await api.reload("nubank");
     await api.addConnection("nubank", "it1");
     await api.preview("it1");
     await api.discover(["it1"]);
+    await api.logout();
     for (const [m, u] of [
+      ["POST", "/admin/api/connect-token"],
+      ["DELETE", "/admin/api/connections/nubank"],
       ["POST", "/admin/api/connections/discover"],
       ["POST", "/admin/api/reload"],
       ["POST", "/admin/api/connections/nubank/reload"],
       ["POST", "/admin/api/connections"],
       ["POST", "/admin/api/connections/preview"],
+      ["POST", "/admin/auth/logout"],
     ]) {
       expect((callFor(m, u).headers as Record<string, string>)["X-CSRF-Token"]).toBe("tok123");
     }
     await api.connections();
     expect((callFor("GET", "/admin/api/connections").headers as Record<string, string>)?.["X-CSRF-Token"]).toBeUndefined();
-  });
-
-  it("sends it on logout", async () => {
-    await api.logout();
-    expect((callFor("POST", "/admin/auth/logout").headers as Record<string, string>)["X-CSRF-Token"]).toBe("tok123");
   });
 });
 
@@ -73,11 +63,16 @@ describe("api errors", () => {
     expect(err.code).toBe("alias_taken");
   });
 
-  it("maps 401 to signed_out", async () => {
-    fetchMock.mockImplementation(async () => reply(401, { error: "signed_out" }));
+  it("drops the cached session on 401, so the next mutation fetches a fresh CSRF token", async () => {
+    const sessionCalls = () => fetchMock.mock.calls.filter(([u]) => u === "/admin/api/session").length;
+    await api.connectToken();
+    await api.connectToken();
+    expect(sessionCalls()).toBe(1);
+    fetchMock.mockImplementationOnce(async () => reply(401, { error: "signed_out" }));
     const err = await api.connections().catch((e) => e);
-    expect(err.status).toBe(401);
-    expect(err.code).toBe("signed_out");
+    expect([err.status, err.code]).toEqual([401, "signed_out"]);
+    await api.connectToken();
+    expect(sessionCalls()).toBe(2);
   });
 
   it("redirects to login with next on 403 reauth_required", async () => {

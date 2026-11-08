@@ -241,17 +241,12 @@ def test_add_connection_pluggy_failure_is_generic(env):
     assert "secrets" not in resp.text
 
 
-def test_add_connection_passes_a_valid_role(env):
+@pytest.mark.parametrize("role", ["business", None])
+def test_add_connection_passes_the_role_or_none_so_the_syncer_suggests(env, role):
     env.login()
-    resp = env.send("POST", "/admin/api/connections", {"alias": "new", "item_id": "item-9", "role": "business"})
-    assert resp.status_code == 201
-    assert env.syncer.roles["new"] == "business"
-
-
-def test_add_connection_without_role_lets_the_syncer_suggest(env):
-    env.login()
-    env.send("POST", "/admin/api/connections", {"alias": "new", "item_id": "item-9"})
-    assert env.syncer.roles["new"] is None
+    body = {"alias": "new", "item_id": "item-9"} | ({"role": role} if role else {})
+    assert env.send("POST", "/admin/api/connections", body).status_code == 201
+    assert env.syncer.roles["new"] == role
 
 
 @pytest.mark.parametrize("role", ["owner", "", None, 3, ["personal"]])
@@ -434,7 +429,7 @@ def test_connect_token_issues_token_restricted_to_meupluggy(env):
     assert env.pluggy.calls == [{"avoidDuplicates": True}]
 
 
-def test_connect_token_pluggy_error_is_generic(env, caplog):
+def test_connect_token_pluggy_error_is_generic(env):
     env.login()
     env.pluggy.error = PluggyError("raw upstream body with secrets", status=500)
     resp = env.send("POST", "/admin/api/connect-token")
@@ -514,7 +509,7 @@ def test_connections_list_with_badges_and_no_raw_errors(env):
     assert rows["main"]["last_synced_at"] == "2026-11-06T09:00:00+00:00"
     assert rows["main"]["history"] == {"transactions": 1, "date_from": "2026-10-01", "date_to": "2026-10-01"}
     assert rows["main"]["accounts"][0]["name"] == "Checking"
-    assert rows["main"]["role"] in ("personal", "business")
+    assert rows["main"]["role"] == "personal"
     assert rows["main"]["accounts"][0]["purpose"] == "regular"
     assert rows["second"]["badge"] == "login error" and rows["second"]["hint"]
     assert rows["third"]["badge"] == "outdated" and rows["third"]["sync_failed"] is True

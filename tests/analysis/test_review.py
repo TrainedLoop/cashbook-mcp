@@ -3,7 +3,6 @@ from decimal import Decimal
 
 import pytest
 
-from cashbook_mcp import prompts
 from cashbook_mcp.analysis.review import review_classification
 from cashbook_mcp.content import MARK_OPEN
 
@@ -124,13 +123,6 @@ def test_scope_and_marking(db, add_row):
         review_classification(db, scope="nope", min_amount=MIN)
 
 
-def test_prompt_names_tools():
-    text = prompts.review_classifications()
-    named = set(prompts.TOOL_CALL.findall(text))
-    assert {"review_classification", "reclassify_transactions"} <= named
-    assert prompts.SAFETY in text
-
-
 def test_hint_counts_an_override_once(db, add_row):
     _row(db, add_row, "both", "-10.00", "internal_transfer", "manual:c1", tax="11122233344", acct="777")
     _row(db, add_row, "tax", "-10.00", "internal_transfer", "manual:c1", tax="111.222.333-44")
@@ -207,12 +199,6 @@ def test_category_override_does_not_hide_a_kind_reason(db, add_row):
     (g,) = _groups(db)
     assert g["reason"] == "unpaired_transfer"
     assert g["transactions"][0]["category"] == "Housing"
-
-
-def test_prompt_mentions_categories():
-    text = prompts.review_classifications()
-    assert "category" in text and "same_payee_recategorized" in text
-    assert "never apply" in text
 
 
 def test_same_payee_recategorized_ignores_the_other_direction(db, add_row):

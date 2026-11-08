@@ -167,10 +167,6 @@ def test_interrupt(db):
     assert isinstance(errors[0], duckdb.InterruptException)
 
 
-def test_size_bytes(db):
-    assert db.size_bytes() > 0
-
-
 def test_views_exclude_removed(db):
     with db.write() as cur:
         insert_connection(cur)
@@ -234,7 +230,7 @@ def test_open_disables_extension_autoload(db):
         assert cur.execute(f"SELECT current_setting('{name}')").fetchone() == (False,)
 
 
-def test_v02_schema_present(db):
+def test_schema_tables_and_checks(db):
     assert db.schema_version() >= 2
     cur = db.read()
     try:

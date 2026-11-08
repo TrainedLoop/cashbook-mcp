@@ -83,6 +83,7 @@ def test_category_only_batch(db):
         {"id": i, "old_category": "Entrepreneurial activities", "new_category": "Rent"} for i in ("t-1", "t-2")
     ]
     assert flow_row(db, "t-1") == ("Rent", "Entrepreneurial activities", True, "purchase")
+    assert flow_row(db, "t-4") == (None, None, False, "purchase")
     assert one(db, "SELECT kind_reason FROM transactions WHERE id = 't-1'") == [("sign",)]
     (change,) = list_changes(db)
     assert change["kind"] is None and change["category"] == "Rent" and change["count"] == 2
@@ -161,15 +162,6 @@ def test_case_insensitive_canonicalization(db):
 
 def test_uncategorized_old_category_is_null(db):
     assert run(db, ["t-4"], category="Rent")["changes"][0]["old_category"] is None
-
-
-def test_flows_effective_vs_original(db):
-    run(db, ["t-1"], category="Rent")
-    assert flow_row(db, "t-1") == ("Rent", "Entrepreneurial activities", True, "purchase")
-    assert flow_row(db, "t-2") == (
-        "Entrepreneurial activities", "Entrepreneurial activities", False, "purchase",
-    )
-    assert flow_row(db, "t-4") == (None, None, False, "purchase")
 
 
 def test_summaries_use_effective_category_and_add_up(db):

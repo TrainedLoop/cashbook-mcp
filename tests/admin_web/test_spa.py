@@ -3,25 +3,12 @@ import shutil
 import pytest
 from admin_support import ASSET_JS, INDEX_HTML, PUBLIC
 
-from cashbook_mcp.admin_web.headers import CSP, SECURITY_HEADERS
-
 EXPECTED_CSP = (
     "default-src 'none'; script-src 'self' https://cdn.pluggy.ai; "
     "style-src 'self' 'unsafe-inline' https://cdn.pluggy.ai; img-src 'self' data: https:; "
     "connect-src 'self' https://api.pluggy.ai; frame-src https://connect.pluggy.ai; "
     "base-uri 'none'; form-action 'self'; frame-ancestors 'none'"
 )
-
-
-def test_headers_values():
-    assert CSP == EXPECTED_CSP
-    assert SECURITY_HEADERS == {
-        "Content-Security-Policy": EXPECTED_CSP,
-        "X-Frame-Options": "DENY",
-        "X-Content-Type-Options": "nosniff",
-        "Referrer-Policy": "same-origin",
-        "Cache-Control": "no-store",
-    }
 
 
 @pytest.mark.parametrize("path", ["/admin", "/admin/", "/admin/connections", "/admin/connect/new?x=1"])

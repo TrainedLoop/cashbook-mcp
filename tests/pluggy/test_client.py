@@ -191,24 +191,19 @@ async def test_create_connect_token():
     assert await env.client().create_connect_token({"itemId": "item-1"}) == "tok"
 
 
-async def test_check_credentials():
+async def test_check_credentials_only_authenticates():
     env = Env(ok)
     await env.client().check_credentials()
-    assert env.auths == 1
+    assert [(r.method, r.url.path) for r in env.requests] == [("POST", "/auth")]
 
 
 async def test_auth_failure_raises():
-    def handler(request):
-        return httpx.Response(403, json={"message": "bad creds", "code": 403})
-
-    env = Env(handler)
-    env.requests = []
+    # Env always answers /auth with 200, so this client gets its own transport.
     c = PluggyClient(
         "cid",
         "secret",
         transport=httpx.MockTransport(lambda r: httpx.Response(403, json={"message": "bad creds"})),
-        clock=env.clock,
-        sleep=env.sleep,
+        sleep=Env(ok).sleep,
     )
     with pytest.raises(PluggyError) as ei:
         await c.check_credentials()

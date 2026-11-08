@@ -1,10 +1,11 @@
 from dataclasses import FrozenInstanceError
 from datetime import date
 from decimal import Decimal
+from typing import get_args
 
 import pytest
 
-from cashbook_mcp.models import KINDS, Transaction
+from cashbook_mcp.models import KINDS, PURPOSES, ROLES, Kind, Purpose, Role, Transaction
 
 
 def _tx() -> Transaction:
@@ -37,6 +38,8 @@ def test_transaction_defaults_and_immutability():
         t.amount = Decimal(1)
 
 
-def test_kinds_order():
-    assert KINDS[0] == "purchase"
-    assert len(KINDS) == 10
+def test_runtime_tuples_match_the_literal_types():
+    # The tuples validate input (reclassify, admin API); they must not drift from the types.
+    assert KINDS == get_args(Kind)
+    assert ROLES == get_args(Role)
+    assert PURPOSES == get_args(Purpose)

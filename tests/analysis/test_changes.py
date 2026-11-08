@@ -85,13 +85,11 @@ def test_empty_result_still_returns_next_cursor(db):
     stamp, tx_id = decode_cursor(out["next_cursor"])
     assert stamp == NOW - timedelta(days=7) and tx_id == ""
     assert list_changes(db, NOW, cursor=out["next_cursor"])["next_cursor"] == out["next_cursor"]
+    assert list_changes(db, NOW, cursor="") == out  # an empty cursor means no cursor
 
 
-@pytest.mark.parametrize("cursor", ["not base64!", "bm9waXBl", "", "Zm9vfGJhcg=="])
+@pytest.mark.parametrize("cursor", ["not base64!", "bm9waXBl", "Zm9vfGJhcg=="])
 def test_bad_cursor_is_a_value_error(db, cursor):
-    if cursor == "":
-        assert list_changes(db, NOW, cursor=cursor)["changes"] == []  # empty means no cursor
-        return
     with pytest.raises(ValueError, match="invalid cursor"):
         list_changes(db, NOW, cursor=cursor)
 
@@ -129,7 +127,7 @@ def test_removed_rows_report_the_overridden_category(db, changed):
     changed("t-card-2", NOW - timedelta(hours=1), removed=True)
     out = {c["id"]: c for c in list_changes(db, NOW)["changes"]}
     assert out["t-card-1"]["category"] == "Housing" and out["t-card-1"]["category_overridden"] is True
-    assert out["t-card-2"]["category"] == "Groceries" or out["t-card-2"]["category"] == "Eating out"
+    assert out["t-card-2"]["category"] == "Eating out"
     assert "category_overridden" not in out["t-card-2"]
 
 

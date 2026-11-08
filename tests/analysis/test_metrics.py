@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 
 from cashbook_mcp.analysis.filters import TxFilters
-from cashbook_mcp.analysis.metrics import APART_FLOWS, SCOPES, scope_clause, totals
+from cashbook_mcp.analysis.metrics import SCOPES, scope_clause, totals
 from cashbook_mcp.analysis.summarize import (
     cash_flow,
     list_categories,
@@ -142,13 +142,6 @@ def test_unknown_scope_raises(db):
         totals(db, *MARCH, "nope")
     with pytest.raises(ValueError, match="unsupported scope"):
         cash_flow(db, *MARCH, scope="nope")
-
-
-def test_scope_clause_and_apart_flows():
-    assert scope_clause("personal") == ("role = ?", ["personal"])
-    assert scope_clause("consolidated") == ("", [])
-    assert APART_FLOWS["business"] == ("to_personal", "from_personal")
-    assert APART_FLOWS["consolidated"] == ()
 
 
 def test_business_scope_with_no_business_connection_is_empty(tmp_path):

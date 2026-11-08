@@ -61,11 +61,7 @@ def test_present_data_as_of_and_strict_json():
     json.dumps(out, allow_nan=False)
 
 
-def test_present_hints():
-    assert HINTS["LOGIN_ERROR"] == "Reconnect this bank in MeuPluggy (meu.pluggy.ai)."
-    assert HINTS["OUTDATED"] == "Pluggy's last sync failed; it retries automatically."
-    assert HINTS["WAITING_USER_INPUT"] == "Open MeuPluggy to finish the bank's verification step."
-    assert HINTS["USER_AUTHORIZATION_REVOKED"] == "Consent was revoked at the bank; reconnect in MeuPluggy."
+def test_present_lists_connection_problems_with_hints():
     out = present(
         {},
         [

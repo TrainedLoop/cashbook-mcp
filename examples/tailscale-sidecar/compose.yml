@@ -1,12 +1,18 @@
 # Tailscale sidecar: the tailscale container joins the tailnet as its own machine
-# (https://<TS_HOSTNAME>.<tailnet>.ts.net, Funnel on 443) and the app shares its
-# network namespace. No port is published on the host. Use together with the root
-# compose file, from the repository root:
+# (https://<TS_HOSTNAME>.<tailnet>.ts.net, Funnel on 443) and proxies to the app
+# over the named network. No port is published on the host. Use together with the
+# root compose file, from the repository root:
 #   docker compose -f docker-compose.yml -f examples/tailscale-sidecar/compose.yml up -d
 #
 # The sidecar is still internet-facing: it sits on a named network with a fixed
 # subnet so firewall/cashbook-mcp-firewall.sh can keep it away from the host, the
-# LAN and the tailnet. Install that unit too (see README.md).
+# LAN and the tailnet. Install that unit too (see README.md); it also lets the
+# sidecar reach the app's port on that network.
+#
+# The two containers keep their own network namespaces on purpose: with
+# network_mode: service:tailscale, a restart of the sidecar (e.g. when it starts
+# before the network is up after a reboot) leaves the app in the old namespace,
+# and Funnel answers 502 until the app is restarted too.
 services:
   tailscale:
     image: tailscale/tailscale:stable
@@ -41,7 +47,8 @@ services:
         max-file: "3"
 
   cashbook:
-    network_mode: service:tailscale
+    networks:
+      - cashbook
     depends_on:
       - tailscale
     restart: unless-stopped

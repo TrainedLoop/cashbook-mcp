@@ -48,7 +48,11 @@ services:
 
   cashbook:
     networks:
-      - cashbook
+      cashbook:
+        # serve.json proxies here. Not "cashbook": that is the sidecar's own
+        # hostname (TS_HOSTNAME), which resolves to the sidecar itself.
+        aliases:
+          - cashbook-app
     depends_on:
       - tailscale
     restart: unless-stopped

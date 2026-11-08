@@ -3,7 +3,7 @@
 This example publishes cashbook-mcp in one way. A `tailscale/tailscale` container joins your tailnet as its own machine (`cashbook`), and serves the app over public HTTPS with Funnel, proxying to it over their Docker network. No port is published on the host. Each service gets its own hostname on port 443.
 
 ```
-claude.ai --HTTPS--> Funnel (:443) on the sidecar --cashbook:8743 on the named network--> cashbook
+claude.ai --HTTPS--> Funnel (:443) on the sidecar --cashbook-app:8743 on the named network--> cashbook
 ```
 
 The container is still reachable from the internet. Two things keep it contained:

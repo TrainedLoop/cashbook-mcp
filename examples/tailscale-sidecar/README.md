@@ -1,14 +1,14 @@
 # Example: Tailscale sidecar
 
-This example publishes cashbook-mcp in one way. A `tailscale/tailscale` container joins your tailnet as its own machine (`cashbook`), and serves the app over public HTTPS with Funnel. The app shares the sidecar's network namespace, so no port is published on the host. Each service gets its own hostname on port 443.
+This example publishes cashbook-mcp in one way. A `tailscale/tailscale` container joins your tailnet as its own machine (`cashbook`), and serves the app over public HTTPS with Funnel, proxying to it over their Docker network. No port is published on the host. Each service gets its own hostname on port 443.
 
 ```
-claude.ai --HTTPS--> Funnel (:443) on the sidecar --127.0.0.1:8743--> cashbook (same network namespace)
+claude.ai --HTTPS--> Funnel (:443) on the sidecar --cashbook:8743 on the named network--> cashbook
 ```
 
 The container is still reachable from the internet. Two things keep it contained:
 
-- **The firewall unit in [firewall/](firewall/).** The sidecar sits on a named network with a fixed subnet (`172.31.2.0/24`), and the firewall keeps that subnet away from the host, the LAN and the tailnet.
+- **The firewall unit in [firewall/](firewall/).** The sidecar sits on a named network with a fixed subnet (`172.31.2.0/24`), and the firewall keeps that subnet away from the host, the LAN and the tailnet. Inside the subnet it only opens the app's port (`APP_PORT`, default 8743) for the sidecar.
 - **Userspace mode.** Tailscale runs in userspace mode, so the app has no route into the tailnet.
 
 This is an example, not a requirement. [docs/tutorial.md](../../docs/tutorial.md) lists the generic requirements.
@@ -78,6 +78,7 @@ docker exec cashbook-mcp-cashbook-1 python -c "import socket; socket.create_conn
 
 ## Notes
 
-- **Restarts:** both containers restart with `unless-stopped`. The OAuth state and the database live in `./data`.
+- **Restarts:** both containers restart with `unless-stopped`, and they don't share a network namespace, so a restart of one doesn't cut the other off. The OAuth state and the database live in `./data`.
+- **Moving from the shared-namespace version:** earlier versions of this example ran the app inside the sidecar's network namespace, so a sidecar restart left the app behind and Funnel answered 502. After `git pull`, rerun the firewall (`sudo systemctl restart cashbook-mcp-firewall`) and then `docker compose ... up -d`.
 - **Other services on the same host:** each one gets its own sidecar, hostname and subnet. If they share one firewall unit, list every subnet in `SUBNETS`.
 - **Shutting down:** run `docker compose down`, disable the firewall unit, then remove the machine in the Tailscale admin console.

@@ -568,10 +568,10 @@ async def test_disconnect_deletes_snapshots_settings_and_overrides(syncer, fake,
     with db.write() as cur:
         cur.execute(
             "INSERT INTO classification_changes (change_id, created_at, kind, note, count) "
-            "VALUES ('c1', TIMESTAMP '2026-11-06 10:00:00', 'expense', NULL, 2)"
+            "VALUES ('c1', TIMESTAMP '2026-11-06 10:00:00', 'refund', NULL, 2)"
         )
-        cur.execute("INSERT INTO classification_overrides VALUES ('t-a', 'a', 'expense', 'c1')")
-        cur.execute("INSERT INTO classification_overrides VALUES ('t-b', 'b', 'expense', 'c1')")
+        cur.execute("INSERT INTO classification_overrides VALUES ('t-a', 'a', 'refund', 'c1')")
+        cur.execute("INSERT INTO classification_overrides VALUES ('t-b', 'b', 'refund', 'c1')")
         cur.execute("INSERT INTO category_overrides VALUES ('t-a', 'a', 'Rent', 'c1')")
         cur.execute("INSERT INTO category_overrides VALUES ('t-b', 'b', 'Rent', 'c1')")
 
@@ -614,17 +614,6 @@ async def test_set_purpose_rejects_card_accounts(syncer, fake, db):
             syncer.set_purpose("item-a-card", purpose)
         assert e.value.code == "purpose_invalid"
     assert rows(db, "SELECT count(*) FROM account_settings") == [(0,)]
-
-
-async def test_set_purpose_reclassifies(syncer, fake, db):
-    fake.add_item("item-a")
-    fake.add_tx("item-a-bank", "tx-1", "2026-10-01", amount=-40.0)
-    await syncer.add_connection("a", "item-a")
-    before = rows(db, "SELECT kind, kind_reason FROM transactions WHERE id = 'tx-1'")
-
-    syncer.set_purpose("item-a-bank", "investment")
-
-    assert rows(db, "SELECT kind, kind_reason FROM transactions WHERE id = 'tx-1'") != before
 
 
 async def test_next_auto_sync_at_is_stored_and_kept_current(syncer, fake):

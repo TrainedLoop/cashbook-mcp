@@ -19,9 +19,7 @@ def test_monthly_subscription_high(db, today):
     assert sorted(item["evidence_ids"]) == [f"t-sub-{n}" for n in range(6)]
     assert item["typical_amount"] == "55.90"
     assert item["last_date"] == "2026-03-05"
-    assert item["next_expected"] == date(2026, 3, 5).fromordinal(
-        date(2026, 3, 5).toordinal() + item["cadence_days"]
-    ).isoformat()
+    assert item["next_expected"] == (date(2026, 3, 5) + timedelta(days=item["cadence_days"])).isoformat()
 
 
 def test_salary_detected_as_income(db, today, add_row):

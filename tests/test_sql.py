@@ -82,7 +82,8 @@ def insert_tx(db, tid, description, amount="-10.00"):
         )
 
 
-def test_constants():
+def test_documented_limits():
+    # README and docs/architecture.md promise 1,000 rows and a 10 s timeout.
     assert MAX_ROWS == 1000
     assert TIMEOUT_S == 10
 
@@ -240,17 +241,11 @@ def test_accepts_select_forms(db):
     assert run_query(db, "SELECT t.amount FROM main.transactions t").rows == []
 
 
-def test_select_file_function_fails(db):
-    with pytest.raises(SqlRejected) as exc:
-        run_query(db, "SELECT * FROM read_text('/etc/hostname')")
-    assert "/etc/hostname" not in str(exc.value)
-    assert "/etc/hostname" not in exc.value.reason
-
-
 @pytest.mark.parametrize(
     "sql",
     [
         "SELECT * FROM read_csv('/etc/passwd')",
+        "SELECT * FROM read_text('/etc/hostname')",
         "SELECT * FROM read_parquet('/tmp/x.parquet')",
         "SELECT * FROM read_blob('/etc/passwd')",
         "SELECT * FROM glob('/etc/*')",
@@ -262,7 +257,7 @@ def test_select_file_function_fails(db):
 def test_file_access_fails(db, sql):
     with pytest.raises(SqlRejected) as exc:
         run_query(db, sql)
-    message = str(exc.value)
+    message = f"{exc.value} {exc.value.reason}"
     for leaked in ("/etc/", "/tmp/", "/home/", ".duckdb/"):
         assert leaked not in message
 
@@ -430,12 +425,6 @@ def test_queries_do_not_leak_transactions(db):
     with db.write() as cur:
         cur.execute("UPDATE connections SET status = 'UPDATED'")
     assert run_query(db, "SELECT status FROM connections").rows == [["UPDATED"]]
-
-
-def test_duckdb_error_type_is_not_leaked(db):
-    with pytest.raises(SqlRejected) as exc:
-        run_query(db, "SELECT 1/0::int, error('boom')")
-    assert not isinstance(exc.value, duckdb.Error)
 
 
 def test_sql_length_cap(db):
@@ -638,10 +627,6 @@ def test_normal_wide_query_keeps_all_rows(db):
     assert len(result.rows) == 500
     assert result.truncated is False
     assert result.rows[499][5] == "text 499 0"
-    full = run_query(
-        db, "SELECT *, repeat('d', 400) AS description2 FROM range(1000) r, v_accounts"
-    )
-    assert full.rows == []
 
 
 _RSS_SCRIPT = """

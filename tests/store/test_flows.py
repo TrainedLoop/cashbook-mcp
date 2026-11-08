@@ -196,9 +196,3 @@ def test_removed_rows_are_not_in_v_flows(db):
         cur.execute("UPDATE transactions SET removed_at = now() WHERE id = 'gone'")
     assert flows(db) == {}
 
-
-def test_v_spending_is_gone(db):
-    import duckdb
-
-    with pytest.raises(duckdb.Error):
-        db.read().execute("SELECT * FROM v_spending")

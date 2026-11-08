@@ -1,6 +1,8 @@
 from datetime import date, datetime
 from decimal import Decimal
 
+import pytest
+
 from cashbook_mcp.analysis.networth import net_worth
 from cashbook_mcp.analysis.overview import finance_overview
 
@@ -92,12 +94,8 @@ def test_scope_filters_roles(db):
     assert net_worth(db, TODAY, **kw)["points"][0]["net"] == "1000.00"
     assert net_worth(db, TODAY, scope="business", **kw)["points"][0]["net"] == "7000.00"
     assert net_worth(db, TODAY, scope="consolidated", **kw)["points"][0]["net"] == "8000.00"
-    try:
+    with pytest.raises(ValueError):
         net_worth(db, TODAY, scope="nope")
-    except ValueError:
-        pass
-    else:
-        raise AssertionError("expected ValueError")
 
 
 def test_empty_store(db):
@@ -184,8 +182,6 @@ def test_date_to_is_clamped_to_today(db):
 
 
 def test_daily_granularity_is_capped(db):
-    import pytest
-
     with pytest.raises(ValueError, match="narrow"):
         net_worth(db, TODAY, date_from=date(2025, 1, 1), granularity="day")
     net_worth(db, TODAY, date_from=date(2025, 2, 25), granularity="day")  # 400 points

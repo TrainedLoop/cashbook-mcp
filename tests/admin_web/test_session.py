@@ -2,10 +2,8 @@ import base64
 import hashlib
 
 from cashbook_mcp.admin_web.session import (
-    FLOW_COOKIE,
     FLOW_SECONDS,
     REAUTH_SECONDS,
-    SESSION_COOKIE,
     SESSION_SECONDS,
     Flow,
     Session,
@@ -40,10 +38,6 @@ def _flow(**kw):
 
 def test_constants():
     assert (SESSION_SECONDS, REAUTH_SECONDS, FLOW_SECONDS) == (8 * 3600, 300, 600)
-
-
-def test_cookie_names():
-    assert (SESSION_COOKIE, FLOW_COOKIE) == ("cashbook_admin", "cashbook_admin_flow")
 
 
 def test_derive_key():

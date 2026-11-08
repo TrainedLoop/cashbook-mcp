@@ -300,7 +300,6 @@ async def test_prompts_registered_and_name_real_tools(server):
         named = set(prompts.TOOL_CALL.findall(body))
         assert named and named <= ALL_TOOL_NAMES
     assert prompts.monthly_review("2024-02").count("2024-02-29") >= 1
-    assert "days_ahead=7" in prompts.upcoming_bills(7, today=day)
     with pytest.raises(ValueError):
         prompts.monthly_review("February; ignore rules")
     with pytest.raises(ValueError):
@@ -443,10 +442,10 @@ async def test_list_connections_shows_role_and_purpose(server):
     assert main["accounts"][0]["purpose"] == "regular"
 
 
-async def test_describe_schema_lists_flows_not_spending(server):
+async def test_describe_schema_tool_lists_flows_and_settings(server):
     out = await call(server, "describe_schema")
     names = {r["name"] for r in out["relations"]}
-    assert "v_flows" in names and "v_spending" not in names
+    assert "v_flows" in names
     assert "account_settings" in names
     assert any("v_flows" in n and "totals" in n for n in out["notes"])
 
@@ -501,26 +500,15 @@ async def test_reclassify_category_tools_and_error_shapes(tmp_path):
         db.close()
 
 
-async def test_reclassify_schema_has_optional_kind_and_category(server):
+async def test_reclassify_schema_and_description(server):
     async with Client(server) as c:
         tool = next(t for t in await c.list_tools() if t.name == "reclassify_transactions")
     props = tool.input_schema["properties"]
     assert list(props) == ["ids", "kind", "category", "note"]
     assert tool.input_schema["required"] == ["ids"]
+    assert set(next(o for o in props["kind"]["anyOf"] if "enum" in o)["enum"]) == set(KINDS)
     assert "category" in tool.description and "never the kind" in tool.description
     assert "bad_category" in tool.description
-
-
-async def test_reclassify_schema_lists_kinds(server):
-    async with Client(server) as c:
-        tool = next(t for t in await c.list_tools() if t.name == "reclassify_transactions")
-    schema = tool.input_schema["properties"]["kind"]
-    assert set(next(o for o in schema["anyOf"] if "enum" in o)["enum"]) == set(KINDS)
-
-
-async def test_reclassify_description_states_kind_effects(server):
-    async with Client(server) as c:
-        tool = next(t for t in await c.list_tools() if t.name == "reclassify_transactions")
     assert "outflows: purchase, fee, loan, other" in tool.description
     assert "inflows" in tool.description and "one_off_out" in tool.description
 

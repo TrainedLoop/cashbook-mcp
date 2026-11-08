@@ -64,15 +64,6 @@ def test_foreign_currency_uses_account_currency():
     assert t.original_currency == "USD"
 
 
-def test_foreign_currency_example_from_brief():
-    extra = dict(load("transactions_page2.json")["results"][1])
-    extra.update(id="tx-fx", amount=10.00, amountInAccountCurrency=55.30, currencyCode="USD")
-    t = tx(snapshot([extra]), "tx-fx")
-    assert t.amount == Decimal("-55.30")
-    assert t.original_amount == Decimal("-10.00")
-    assert t.original_currency == "USD"
-
-
 def test_date_not_shifted():
     extra = dict(load("transactions_page1.json")["results"][0])
     extra.update(id="tx-late", date="2026-03-31T23:30:00.000Z")

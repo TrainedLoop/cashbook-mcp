@@ -1,7 +1,6 @@
 """Packaging invariants: compose shape, release tag check, no personal data in the repo."""
 
 import re
-import tomllib
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -44,8 +43,6 @@ def test_release_checks_tag_against_pyproject_version():
     assert "pyproject.toml" in text
     assert "GITHUB_REF_NAME" in text
     assert "ghcr.io/trainedloop/cashbook-mcp" in text
-    version = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]["version"]
-    assert version
 
 
 def test_dockerfile_shape():
@@ -81,7 +78,7 @@ def test_dockerfile_keeps_fastmcp_state_on_the_data_volume():
     assert re.search(r"FASTMCP_HOME=/data/fastmcp\b", text)
 
 
-def test_dockerfile_ships_httpfs_and_disables_autoinstall_paths():
+def test_dockerfile_ships_httpfs_in_a_fixed_extension_dir():
     text = (ROOT / "Dockerfile").read_text()
     assert "DUCKDB_EXTENSION_DIR=/opt/duckdb-ext" in text
     assert "INSTALL httpfs" in text

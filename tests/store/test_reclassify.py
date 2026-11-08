@@ -48,7 +48,7 @@ def db(tmp_path):
 
 
 def run(db, ids, kind="refund", note=None, now=NOW, cap=1000):
-    return reclassify(db, ids, kind, note, now=now, tz=TZ, daily_cap=cap)
+    return reclassify(db, ids, kind, note, now=now, tz=TZ, daily_cap=cap, tool_names=TOOLS)
 
 
 def state(db, tid):
@@ -72,7 +72,7 @@ def test_reclassify_and_undo(db):
     assert list_changes(db)[0]["note"] == "fix"
 
     assert undo(db, out["change_id"], now=NOW) == {"change_id": out["change_id"], "reverted": 2}
-    assert state(db, "t-1")[0] == "purchase" and state(db, "t-1")[1].startswith("manual") is False
+    assert state(db, "t-1")[0] == "purchase" and not state(db, "t-1")[1].startswith("manual")
     assert list_changes(db)[0]["undone_at"] is not None
     with pytest.raises(ReclassifyError) as e:
         undo(db, out["change_id"], now=NOW)
@@ -135,8 +135,8 @@ def test_newer_batch_wins_and_undo_order(db):
     assert undo(db, a["change_id"], now=NOW)["reverted"] == 0  # B owns the override now
     assert state(db, "t-1")[0] == "income"
     assert undo(db, b["change_id"], now=NOW)["reverted"] == 1
-    assert state(db, "t-1") == ("purchase", state(db, "t-1")[1])
-    assert not state(db, "t-1")[1].startswith("manual")
+    kind, reason = state(db, "t-1")
+    assert kind == "purchase" and not reason.startswith("manual")
 
 
 def test_overrides_survive_sync_and_ignore_removed_rows(db):

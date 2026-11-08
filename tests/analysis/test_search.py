@@ -135,7 +135,7 @@ def test_scope_keeps_cross_role_transfers_and_drops_same_role_ones(db):
     assert "t-pix-in" in ids(scope="business", direction="in")
     # A card bill paid inside the same scope stays internal.
     assert "t-bill-pay" not in ids(scope="personal")
-    # Without scope, v0.1 behavior: internal kinds are excluded whatever their flow.
+    # Without scope, internal kinds are excluded by kind, whatever their flow.
     assert not {"t-pix-out", "t-pix-in"} & ids()
     assert "t-pix-out" in ids(scope="personal", kinds=["internal_transfer"])
 

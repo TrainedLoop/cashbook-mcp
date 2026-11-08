@@ -2,6 +2,7 @@ from datetime import UTC, date, datetime
 from zoneinfo import ZoneInfo
 
 from cashbook_mcp.analysis.filters import today_in
+from cashbook_mcp.analysis.forecast import cash_forecast
 from cashbook_mcp.analysis.overview import finance_overview
 
 SP = ZoneInfo("America/Sao_Paulo")
@@ -84,12 +85,8 @@ def test_business_block_only_with_a_business_connection(db, add_row, today):
 
 
 def test_overview_has_forecast_block(db, today):
-    from cashbook_mcp.analysis.overview import finance_overview
-
     block = finance_overview(db, today)["forecast"]
     assert set(block) == {"lowest", "negative_on", "low_confidence_events"}
-    from cashbook_mcp.analysis.forecast import cash_forecast
-
     events = cash_forecast(db, today, days=30)["events"]
     assert block["low_confidence_events"] == sum(e["confidence"] == "low" for e in events) > 0
     assert set(block["lowest"]) == {"date", "balance"}

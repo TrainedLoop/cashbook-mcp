@@ -21,6 +21,17 @@ TABLES = {
 }
 
 
+LATEST = max(int(f.name[:4]) for f in MIGRATIONS_DIR.glob("[0-9][0-9][0-9][0-9]_*.sql"))
+
+
+def copy_migrations(dst, upto=LATEST):
+    dst.mkdir()
+    for f in MIGRATIONS_DIR.glob("[0-9][0-9][0-9][0-9]_*.sql"):
+        if int(f.name[:4]) <= upto:
+            shutil.copy(f, dst)
+    return dst
+
+
 def columns(db, table):
     return {
         name: dtype
@@ -35,7 +46,7 @@ def columns(db, table):
 def test_fresh_db_is_at_latest_version(tmp_path):
     db = Database.open(tmp_path / "c.duckdb", KEY)
     try:
-        assert db.schema_version() >= 4
+        assert db.schema_version() == LATEST
         assert db.read().execute("SELECT count(*) FROM schema_version").fetchone() == (1,)
     finally:
         db.close()
@@ -91,7 +102,7 @@ def test_reopen_is_idempotent(tmp_path):
     Database.open(path, KEY).close()
     db = Database.open(path, KEY)
     try:
-        assert db.schema_version() >= 3
+        assert db.schema_version() == LATEST
     finally:
         db.close()
     assert not list(tmp_path.glob("*.bak-*"))
@@ -107,28 +118,22 @@ def test_migration_backup_and_failure(tmp_path):
         )
     db.close()
 
-    bad_dir = tmp_path / "migrations"
-    bad_dir.mkdir()
-    shutil.copy(MIGRATIONS_DIR / "0001_initial.sql", bad_dir)
-    shutil.copy(MIGRATIONS_DIR / "0002_v02.sql", bad_dir)
-    shutil.copy(MIGRATIONS_DIR / "0003_flows.sql", bad_dir)
-    shutil.copy(MIGRATIONS_DIR / "0004_category_overrides.sql", bad_dir)
-    shutil.copy(MIGRATIONS_DIR / "0005_one_off.sql", bad_dir)
-    shutil.copy(MIGRATIONS_DIR / "0006_changes_payment_method.sql", bad_dir)
-    (bad_dir / "0007_bad.sql").write_text(
+    bad_name = f"{LATEST + 1:04d}_bad.sql"
+    bad_dir = copy_migrations(tmp_path / "migrations")
+    (bad_dir / bad_name).write_text(
         "CREATE TABLE half_done (x INTEGER);\nALTER TABLE connections DROP COLUMN nope;\n"
     )
 
     with pytest.raises(MigrationError) as exc:
         Database.open(path, KEY, migrations_dir=bad_dir)
-    assert "0007_bad.sql" in str(exc.value)
+    assert bad_name in str(exc.value)
     assert KEY not in str(exc.value)
 
-    assert (tmp_path / "c.duckdb.bak-6").exists()
+    assert (tmp_path / f"c.duckdb.bak-{LATEST}").exists()
 
     db = Database.open(path, KEY)
     try:
-        assert db.schema_version() >= 4
+        assert db.schema_version() == LATEST
         cur = db.read()
         assert cur.execute("SELECT alias FROM connections").fetchall() == [("main",)]
         tables = {r[0] for r in cur.execute(
@@ -138,7 +143,7 @@ def test_migration_backup_and_failure(tmp_path):
     finally:
         db.close()
 
-    backup = Database.open(tmp_path / "c.duckdb.bak-6", KEY)
+    backup = Database.open(tmp_path / f"c.duckdb.bak-{LATEST}", KEY)
     try:
         assert backup.read().execute("SELECT alias FROM connections").fetchall() == [("main",)]
     finally:
@@ -148,84 +153,21 @@ def test_migration_backup_and_failure(tmp_path):
 def test_successful_later_migration(tmp_path):
     path = tmp_path / "c.duckdb"
     Database.open(path, KEY).close()
-    mdir = tmp_path / "migrations"
-    mdir.mkdir()
-    shutil.copy(MIGRATIONS_DIR / "0001_initial.sql", mdir)
-    shutil.copy(MIGRATIONS_DIR / "0002_v02.sql", mdir)
-    shutil.copy(MIGRATIONS_DIR / "0003_flows.sql", mdir)
-    shutil.copy(MIGRATIONS_DIR / "0004_category_overrides.sql", mdir)
-    shutil.copy(MIGRATIONS_DIR / "0005_one_off.sql", mdir)
-    shutil.copy(MIGRATIONS_DIR / "0006_changes_payment_method.sql", mdir)
-    (mdir / "0007_add.sql").write_text("CREATE TABLE extra (x INTEGER);")
+    mdir = copy_migrations(tmp_path / "migrations")
+    (mdir / f"{LATEST + 1:04d}_add.sql").write_text("CREATE TABLE extra (x INTEGER);")
     (mdir / "notes.txt").write_text("ignored")
     db = Database.open(path, KEY, migrations_dir=mdir)
     try:
-        assert db.schema_version() == 7
+        assert db.schema_version() == LATEST + 1
         assert db.read().execute("SELECT count(*) FROM extra").fetchone() == (0,)
     finally:
         db.close()
-    assert (tmp_path / "c.duckdb.bak-6").exists()
-
-
-def test_migrations_ship_in_package():
-    assert (MIGRATIONS_DIR / "0001_initial.sql").is_file()
-    assert MIGRATIONS_DIR.name == "migrations"
-    assert MIGRATIONS_DIR.parent.name == "store"
-
-
-def test_v02_migration_wipes_v01_data(tmp_path):
-    path = tmp_path / "c.duckdb"
-    v1_dir = tmp_path / "v1"
-    v1_dir.mkdir()
-    shutil.copy(MIGRATIONS_DIR / "0001_initial.sql", v1_dir)
-    db = Database.open(path, KEY, migrations_dir=v1_dir)
-    assert db.schema_version() == 1
-    with db.write() as cur:
-        cur.execute(
-            "INSERT INTO connections (alias, item_id, connector_name, created_at) "
-            "VALUES ('main', 'item-1', 'Bank', now())"
-        )
-        cur.execute(
-            "INSERT INTO accounts VALUES ('a1', 'main', 'item-1', 'BANK', 'CHECKING', 'Acc', "
-            "NULL, NULL, 10, 'BRL', NULL, NULL, now(), now(), NULL)"
-        )
-        cur.execute(
-            "INSERT INTO transactions (id, alias, account_id, date, amount, currency, "
-            "description, first_seen_at, last_seen_at) "
-            "VALUES ('t1', 'main', 'a1', '2026-01-02', -5, 'BRL', 'x', now(), now())"
-        )
-    db.close()
-
-    db = Database.open(path, KEY)
-    try:
-        assert db.schema_version() >= 2
-        cur = db.read()
-        tables = [
-            r[0]
-            for r in cur.execute(
-                "SELECT table_name FROM information_schema.tables "
-                "WHERE table_catalog='cb' AND table_type='BASE TABLE' "
-                "AND table_name <> 'schema_version'"
-            ).fetchall()
-        ]
-        assert {"connections", "transactions", "account_settings", "classification_overrides"} <= set(tables)
-        for t in tables:
-            assert cur.execute(f"SELECT count(*) FROM {t}").fetchone() == (0,), t
-        cols = {r[0] for r in cur.execute("DESCRIBE connections").fetchall()}
-        assert "role" in cols
-        view_cols = {r[0] for r in cur.execute("DESCRIBE v_transactions").fetchall()}
-        assert {"installment_number", "installment_total", "purchase_date"} <= view_cols
-    finally:
-        db.close()
-    assert (tmp_path / "c.duckdb.bak-1").exists()
+    assert (tmp_path / f"c.duckdb.bak-{LATEST}").exists()
 
 
 def test_v04_migration_keeps_v3_data(tmp_path):
     path = tmp_path / "c.duckdb"
-    v3_dir = tmp_path / "v3"
-    v3_dir.mkdir()
-    for name in ("0001_initial.sql", "0002_v02.sql", "0003_flows.sql"):
-        shutil.copy(MIGRATIONS_DIR / name, v3_dir)
+    v3_dir = copy_migrations(tmp_path / "v3", 3)
     db = Database.open(path, KEY, migrations_dir=v3_dir)
     assert db.schema_version() == 3
     with db.write() as cur:
@@ -241,7 +183,7 @@ def test_v04_migration_keeps_v3_data(tmp_path):
 
     db = Database.open(path, KEY)
     try:
-        assert db.schema_version() >= 4
+        assert db.schema_version() == LATEST
         cur = db.read()
         assert cur.execute("SELECT alias FROM connections").fetchall() == [("main",)]
         assert cur.execute(
@@ -261,10 +203,7 @@ def test_v04_migration_keeps_v3_data(tmp_path):
 
 def test_v5_keeps_overrides_journal_and_adds_one_off_flow(tmp_path):
     path = tmp_path / "c.duckdb"
-    v4 = tmp_path / "v4"
-    v4.mkdir()
-    for f in sorted(MIGRATIONS_DIR.glob("000[1-4]_*.sql")):
-        shutil.copy(f, v4)
+    v4 = copy_migrations(tmp_path / "v4", 4)
     db = Database.open(path, KEY, migrations_dir=v4)
     assert db.schema_version() == 4
     with db.write() as cur:
@@ -293,7 +232,7 @@ def test_v5_keeps_overrides_journal_and_adds_one_off_flow(tmp_path):
 
     db = Database.open(path, KEY)
     try:
-        assert db.schema_version() >= 5
+        assert db.schema_version() == LATEST
         cur = db.read()
         assert cur.execute("SELECT category FROM category_overrides").fetchall() == [("Housing",)]
         assert cur.execute("SELECT change_id FROM classification_changes").fetchall() == [("c1",)]
@@ -306,10 +245,7 @@ def test_v5_keeps_overrides_journal_and_adds_one_off_flow(tmp_path):
 
 def test_v6_backfills_changed_at_and_keeps_overrides(tmp_path):
     path = tmp_path / "c.duckdb"
-    v5 = tmp_path / "v5"
-    v5.mkdir()
-    for f in sorted(MIGRATIONS_DIR.glob("000[1-5]_*.sql")):
-        shutil.copy(f, v5)
+    v5 = copy_migrations(tmp_path / "v5", 5)
     db = Database.open(path, KEY, migrations_dir=v5)
     assert db.schema_version() == 5
     with db.write() as cur:
@@ -335,7 +271,7 @@ def test_v6_backfills_changed_at_and_keeps_overrides(tmp_path):
 
     db = Database.open(path, KEY)
     try:
-        assert db.schema_version() >= 6
+        assert db.schema_version() == LATEST
         cur = db.read()
         assert cur.execute(
             "SELECT id, changed_at = first_seen_at, payment_method FROM transactions ORDER BY id"

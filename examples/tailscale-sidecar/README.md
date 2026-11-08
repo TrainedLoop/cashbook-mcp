@@ -79,6 +79,6 @@ docker exec cashbook-mcp-cashbook-1 python -c "import socket; socket.create_conn
 ## Notes
 
 - **Restarts:** both containers restart with `unless-stopped`, and they don't share a network namespace, so a restart of one doesn't cut the other off. The OAuth state and the database live in `./data`.
-- **Moving from the shared-namespace version:** earlier versions of this example ran the app inside the sidecar's network namespace, so a sidecar restart left the app behind and Funnel answered 502. After `git pull`, rerun the firewall (`sudo systemctl restart cashbook-mcp-firewall`) and then `docker compose ... up -d`.
+- **Moving from the shared-namespace version:** earlier versions of this example ran the app inside the sidecar's network namespace, so a sidecar restart left the app behind and Funnel answered 502. After `git pull`, rerun the firewall (`sudo systemctl restart cashbook-mcp-firewall`) and then `docker compose ... up -d --force-recreate`. The sidecar must be recreated too: it mounts `serve.json` as a single file, and `git pull` replaces that file, so a running sidecar keeps reading the old one.
 - **Other services on the same host:** each one gets its own sidecar, hostname and subnet. If they share one firewall unit, list every subnet in `SUBNETS`.
 - **Shutting down:** run `docker compose down`, disable the firewall unit, then remove the machine in the Tailscale admin console.

@@ -35,9 +35,9 @@
 <main id="main">
   <div class="hero">
     <div class="wrap">
-      <p class="status"><strong>Beta</strong> v0.1.3, open source under MIT</p>
+      <p class="status"><strong>Beta</strong> v0.2.4, open source under MIT</p>
       <h1>Ask your assistant about your money. It can only read it.</h1>
-      <p class="lede">An MCP server you run yourself. It syncs your bank accounts, cards, investments and loans from Pluggy (through the free MeuPluggy connector, Brazilian Open Finance) into an encrypted database on your own disk, and lets Claude answer questions about spending, bills and recurring charges.</p>
+      <p class="lede">An MCP server you run yourself. It syncs your bank accounts, cards, investments and loans from Pluggy (through the free MeuPluggy connector, Brazilian Open Finance) into an encrypted database on your own disk, and lets Claude answer questions about spending, bills, recurring charges, net worth and the cash you'll have next month. If you run a company, your personal and business money are kept apart.</p>
       <div class="actions">
         <a class="btn btn-primary" href="https://github.com/TrainedLoop/cashbook-mcp/blob/main/docs/tutorial.md">Set it up</a>
         <a class="btn btn-ghost" href="https://github.com/TrainedLoop/cashbook-mcp">GitHub</a>
@@ -49,8 +49,8 @@
     <div class="wrap">
       <ul class="pillars">
         <li>
-          <h2>Read-only, end to end</h2>
-          <p>The server never changes anything at Pluggy, and every tool only reads. The SQL tool accepts a single SELECT in a locked-down sandbox.</p>
+          <h2>Read-only toward your banks</h2>
+          <p>The server never changes anything at Pluggy. The only local write is the assistant fixing a transaction's classification after asking you: journaled, capped and reversible. The SQL tool accepts a single SELECT in a locked-down sandbox.</p>
         </li>
         <li>
           <h2>Your data, your disk</h2>
@@ -71,15 +71,20 @@
         <table>
           <thead><tr><th>Tool</th><th>Purpose</th></tr></thead>
           <tbody>
-            <tr><td><code>finance_overview</code></td><td>Balances, cards, upcoming bills, month to date, top categories, connection problems</td></tr>
+            <tr><td><code>finance_overview</code></td><td>Start here: balances, cards, upcoming bills, month to date, business block, net worth, forecast, connection problems</td></tr>
             <tr><td><code>search_transactions</code>, <code>get_transactions</code></td><td>Filtered, paginated search; full rows by id</td></tr>
-            <tr><td><code>summarize_transactions</code>, <code>cash_flow</code>, <code>find_recurring</code></td><td>Aggregations and recurring-charge candidates</td></tr>
+            <tr><td><code>summarize_transactions</code>, <code>cash_flow</code></td><td>Aggregations by scope (personal, business, consolidated) and by one or two dimensions</td></tr>
+            <tr><td><code>net_worth</code>, <code>cash_forecast</code></td><td>Net worth over time; projected cash balance for the next 30 to 90 days</td></tr>
+            <tr><td><code>find_recurring</code>, <code>recurring_changes</code></td><td>Recurring charges; price increases, new, stopped and duplicate charges</td></tr>
+            <tr><td><code>list_changes</code></td><td>What changed since the last run, so scheduled routines resume where they stopped</td></tr>
+            <tr><td><code>review_classification</code>, <code>reclassify_transactions</code>, <code>undo_reclassification</code></td><td>Transactions the server is unsure about; fix their kind or category, undo a batch</td></tr>
             <tr><td><code>list_bills</code>, <code>list_investments</code>, <code>list_loans</code></td><td>Cards, investments and loans</td></tr>
             <tr><td><code>describe_schema</code>, <code>query_sql</code></td><td>The schema, and SELECT-only SQL over it</td></tr>
           </tbody>
         </table>
       </div>
-      <p>One owner per instance: only Google logins in <code>ALLOWED_EMAILS</code> get in. An owner page at <code>/admin</code> connects banks with MeuPluggy and works on a phone.</p>
+      <p>Ready-made prompts: <code>monthly_review</code>, <code>weekly_review</code>, <code>upcoming_bills</code>, <code>subscriptions_audit</code>, <code>review_classifications</code>. The full list of tools is in the <a href="https://github.com/TrainedLoop/cashbook-mcp#tools">README</a>.</p>
+      <p>One owner per instance: only Google logins in <code>ALLOWED_EMAILS</code> get in. An owner page at <code>/admin</code> connects banks with MeuPluggy, sets whether each connection is personal or business and what each account is for, and works on a phone.</p>
     </div>
   </section>
 </main>

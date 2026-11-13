@@ -106,10 +106,13 @@ def test_sidecar_sits_on_the_firewalled_subnet():
     assert (ROOT / "examples/tailscale-sidecar/firewall/cashbook-mcp-firewall.service").exists()
 
 
-def test_readme_quick_start_has_local_build_note():
+def test_quick_start_uses_the_published_image():
+    # The image is published to ghcr.io, so the docs no longer tell people to build it first.
     text = (ROOT / "README.md").read_text()
     quick = text[text.index("## Quick start") : text.index("## Development")]
-    assert "docker build -t cashbook-mcp:dev ." in quick
+    assert "ghcr.io/trainedloop/cashbook-mcp:0.2" in quick
+    for doc in ("README.md", "docs/tutorial.md"):
+        assert "first release" not in (ROOT / doc).read_text(), doc
 
 
 def test_workflows_install_httpfs_before_tests():

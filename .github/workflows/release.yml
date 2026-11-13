@@ -53,7 +53,7 @@ jobs:
           labels: |
             org.opencontainers.image.title=cashbook-mcp
             org.opencontainers.image.description=Read-only MCP server over Pluggy financial data
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64,linux/arm64

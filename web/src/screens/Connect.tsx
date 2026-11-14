@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { PluggyConnect } from "react-pluggy-connect";
-import { api, errorMessage, existingItemIds, type ConnectTokenResponse, type FoundItem } from "../api";
+import { api, errorMessage, type ConnectTokenResponse, type FoundItem } from "../api";
 import ChooseItems from "../components/ChooseItems";
 
 interface Props {
@@ -17,9 +17,8 @@ type Phase =
 const NOT_COMPLETED = "The connection did not complete. Try again.";
 
 /**
- * MeuPluggy shares every bank the owner linked there, one item each, under a single login. The
- * widget creates them the first time; afterwards Pluggy refuses a new item and names the existing
- * ones. Either way the owner then gets the whole list and picks an alias per bank.
+ * MeuPluggy authorizes one bank per widget run: each bank linked there becomes its own item, all
+ * under the same login. The owner runs the widget once per bank and names each new item here.
  */
 export default function Connect({ onDone, onCancel }: Props) {
   const [phase, setPhase] = useState<Phase>({ kind: "idle" });
@@ -40,18 +39,18 @@ export default function Connect({ onDone, onCancel }: Props) {
     }
   }
 
-  async function find(token: ConnectTokenResponse, created: string | null) {
+  function failed() {
     settled.current = true;
+    setError(NOT_COMPLETED);
+    setPhase({ kind: "idle" });
+  }
+
+  async function found(created: string) {
+    settled.current = true;
+    setError(null);
     setPhase({ kind: "finding" });
-    const ids = await existingItemIds(token.accessToken, token.connectorIds[0]);
-    if (created && !ids.includes(created)) ids.unshift(created);
-    if (ids.length === 0) {
-      setError(NOT_COMPLETED);
-      setPhase({ kind: "idle" });
-      return;
-    }
     try {
-      setPhase({ kind: "choose", items: (await api.discover(ids)).items });
+      setPhase({ kind: "choose", items: (await api.discover([created])).items });
     } catch (e) {
       setError(errorMessage(e));
       setPhase({ kind: "idle" });
@@ -63,8 +62,8 @@ export default function Connect({ onDone, onCancel }: Props) {
   return (
     <section className="card">
       <h1>Connect with MeuPluggy</h1>
-      <p className="muted">Sign in to MeuPluggy in the window that opens. You name each bank afterwards.</p>
-      {phase.kind === "finding" && <p role="status" className="muted">Looking for your banks...</p>}
+      <p className="muted">Sign in to MeuPluggy in the window that opens. You name the bank afterwards.</p>
+      {phase.kind === "finding" && <p role="status" className="muted">Looking for your bank...</p>}
       {error && <p role="alert" className="error">{error}</p>}
       <div className="actions">
         <button type="button" onClick={onCancel}>Back</button>
@@ -77,8 +76,8 @@ export default function Connect({ onDone, onCancel }: Props) {
           connectToken={phase.token.accessToken}
           includeSandbox={false}
           connectorIds={phase.token.connectorIds}
-          onSuccess={(data) => void find(phase.token, data.item.id)}
-          onError={() => void find(phase.token, null)}
+          onSuccess={(data) => void found(data.item.id)}
+          onError={failed}
           onClose={() => {
             if (!settled.current) setPhase({ kind: "idle" });
           }}

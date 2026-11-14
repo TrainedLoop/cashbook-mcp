@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { api, ApiError, existingItemIds, resetSession, suggestAlias } from "../api";
+import { api, ApiError, resetSession, suggestAlias } from "../api";
 
 function reply(status: number, body: unknown) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -84,31 +84,6 @@ describe("api errors", () => {
     const err = await api.disconnect("nubank").catch((e) => e);
     expect(err.code).toBe("reauth_required");
     expect(assign).toHaveBeenCalledWith("/admin/auth/login?next=%2Fadmin");
-  });
-});
-
-describe("existingItemIds", () => {
-  it("reads the item ids from Pluggy's duplicate refusal", async () => {
-    fetchMock.mockImplementation(async () =>
-      reply(400, { code: 400, codeDescription: "ITEM_USER_ALREADY_EXISTS", data: { items: ["a-1", "b-2", 7, "../x"] } }),
-    );
-    expect(await existingItemIds("ct-1", 200)).toEqual(["a-1", "b-2"]);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe("https://api.pluggy.ai/items");
-    expect((init.headers as Record<string, string>)["X-API-KEY"]).toBe("ct-1");
-    expect(init.body).toBe(JSON.stringify({ connectorId: 200, parameters: {} }));
-    expect(init.credentials).toBeUndefined();
-  });
-
-  it("gives an empty list for any other answer", async () => {
-    fetchMock.mockImplementation(async () => reply(400, { codeDescription: "OTHER", data: { items: ["a-1"] } }));
-    expect(await existingItemIds("ct-1", 200)).toEqual([]);
-    fetchMock.mockImplementation(async () => reply(201, { id: "new" }));
-    expect(await existingItemIds("ct-1", 200)).toEqual([]);
-    fetchMock.mockImplementation(async () => {
-      throw new TypeError("network");
-    });
-    expect(await existingItemIds("ct-1", 200)).toEqual([]);
   });
 });
 

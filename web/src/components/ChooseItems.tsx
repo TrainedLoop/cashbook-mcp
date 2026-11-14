@@ -23,7 +23,7 @@ function initialRows(items: FoundItem[]): Record<string, Row> {
   for (const item of items.filter(addable)) {
     const alias = suggestAlias(item.bank, taken);
     taken.add(alias);
-    rows[item.item_id] = { include: true, alias, role: item.suggested_role ?? "personal", added: null, error: null };
+    rows[item.item_id] = { include: !item.same_bank_as, alias, role: item.suggested_role ?? "personal", added: null, error: null };
   }
   return rows;
 }
@@ -62,10 +62,15 @@ export default function ChooseItems({ items, onDone, onCancel }: Props) {
   }
 
   const anyAddable = items.some(addable);
+  const allConnected = items.length > 0 && items.every((i) => i.alias !== null);
   return (
     <section className="card">
-      <h1>Choose your banks</h1>
-      <p className="muted">These are the banks MeuPluggy shares with this server. Give each one you want an alias.</p>
+      <h1>Add this bank</h1>
+      {anyAddable && (
+        <p className="muted">
+          MeuPluggy authorizes one bank at a time. Give this one an alias, then connect again for the next bank.
+        </p>
+      )}
       <ul className="list">
         {items.map((item) => {
           const row = rows[item.item_id];
@@ -81,6 +86,12 @@ export default function ChooseItems({ items, onDone, onCancel }: Props) {
                 </ul>
               )}
               {item.alias && <p className="muted">Connected as <strong>{item.alias}</strong>.</p>}
+              {row && !row.added && item.same_bank_as && (
+                <p className="error">
+                  {bank} is already connected as <strong>{item.same_bank_as}</strong>. Adding it again may count its
+                  money twice.
+                </p>
+              )}
               {item.error && <p className="error">{errorMessage(new ApiError(422, item.error))}</p>}
               {row?.added && <p>Added as <strong>{row.added}</strong>.</p>}
               {row && !row.added && (
@@ -126,7 +137,7 @@ export default function ChooseItems({ items, onDone, onCancel }: Props) {
           );
         })}
       </ul>
-      {!anyAddable && <p className="muted">Every bank shared by MeuPluggy is already connected.</p>}
+      {allConnected && <p className="muted">This bank is already connected.</p>}
       <div className="actions">
         <button type="button" onClick={anyAddable ? onCancel : onDone}>Back</button>
         {anyAddable && (

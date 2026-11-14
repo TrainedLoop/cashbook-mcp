@@ -105,7 +105,9 @@ Counterpart names, descriptions and payment messages are written by third partie
 
 The Pluggy client makes GET requests plus `POST /auth` (API key) and `POST /connect_token` (the Connect widget). Nothing else is sent. `GET /v2/transactions` is used; the deprecated `GET /transactions` and `GET /identity` are never called.
 
-Connecting banks runs in the owner's browser, with the short-lived connect token. MeuPluggy shares each bank linked there as its own item, all under one login. The widget creates them the first time. Pluggy cannot list items on personal accounts, and once one MeuPluggy item exists, the `avoidDuplicates` token makes Pluggy refuse a new one (`ITEM_USER_ALREADY_EXISTS`) and name the existing ids. After the widget succeeds or fails, the SPA repeats that request (`POST /items` with the connect token, the same call the widget makes) only to read those ids, then sends them to `POST /admin/api/connections/discover`, which validates each one like any other item. The owner picks an alias per bank.
+Connecting banks runs in the owner's browser, with the short-lived connect token. MeuPluggy shares each bank linked there as its own item, all under one login, and each bank needs its own authorization, so the owner runs the widget once per bank.
+
+The connect token is issued without `avoidDuplicates`, because with it Pluggy refuses every MeuPluggy item after the first (`ITEM_USER_ALREADY_EXISTS`). When the widget succeeds, the SPA sends the new item id to `POST /admin/api/connections/discover`, which validates it like any other item, and the owner picks its alias. Without `avoidDuplicates`, authorizing a connected bank again can create a second item for it, so discover reports `same_bank_as` (a stored alias with the same bank name, taken from the first checking account) and the SPA warns and leaves that item unchecked. The browser makes no Pluggy call of its own beyond the widget.
 
 ## Threat model
 

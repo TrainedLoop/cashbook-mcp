@@ -61,7 +61,11 @@ def list_connections(db: Database) -> list[dict]:
     accounts: dict[str, list[dict]] = {}
     for a in _rows(
         db,
-        "SELECT a.id, a.alias, a.type, a.subtype, a.name, coalesce(s.purpose, 'regular') AS purpose "
+        # The number tells apart accounts a bank names the same; only its last four characters.
+        "SELECT a.id, a.alias, a.type, a.subtype, a.name, "
+        "CASE WHEN regexp_replace(coalesce(a.number, ''), '\\W', '', 'g') = '' THEN NULL "
+        "ELSE '****' || right(regexp_replace(a.number, '\\W', '', 'g'), 4) END AS number, "
+        "coalesce(s.purpose, 'regular') AS purpose "
         "FROM v_accounts a LEFT JOIN account_settings s ON s.account_id = a.id ORDER BY a.alias, a.name",
     ):
         accounts.setdefault(a.pop("alias"), []).append(a)

@@ -19,7 +19,7 @@ const connection: Connection = {
   last_synced_at: null,
   consent_expires_at: null,
   accounts: [
-    { id: "a1", type: "BANK", subtype: "CHECKING_ACCOUNT", name: "Conta", purpose: "regular" },
+    { id: "a1", type: "BANK", subtype: "CHECKING_ACCOUNT", name: "Conta", number: "****1234", purpose: "regular" },
     { id: "c1", type: "CREDIT", subtype: "CREDIT_CARD", name: "Cartao" },
   ],
   history: { transactions: 1, date_from: null, date_to: null },
@@ -73,11 +73,11 @@ describe("role and purpose selectors", () => {
     const user = userEvent.setup();
     patchReply = () => reply(200, { account_id: "a1", purpose: "investment" });
     render(<App />);
-    await user.selectOptions(await screen.findByLabelText("Account type for Conta"), "investment");
+    await user.selectOptions(await screen.findByLabelText("Account type for Conta · Checking · ****1234"), "investment");
     await waitFor(() =>
       expect(calls).toContainEqual({ url: "/admin/api/accounts/a1", method: "PATCH", body: { purpose: "investment" } }),
     );
-    expect(screen.queryByLabelText("Account type for Cartao")).toBeNull();
+    expect(screen.queryByLabelText(/^Account type for Cartao/)).toBeNull();
   });
 
   it("shows the error and keeps the previous value on failure", async () => {
@@ -114,7 +114,7 @@ describe("role and purpose selectors", () => {
     const user = userEvent.setup();
     patchReply = () => reply(422, { error: "purpose_invalid" });
     render(<App />);
-    const select = await screen.findByLabelText("Account type for Conta");
+    const select = await screen.findByLabelText("Account type for Conta · Checking · ****1234");
     await user.selectOptions(select, "investment");
     expect(await screen.findByText("That account type is not valid.")).toBeInTheDocument();
     expect(select).toHaveValue("regular");

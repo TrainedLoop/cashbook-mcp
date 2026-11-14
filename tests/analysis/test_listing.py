@@ -37,6 +37,18 @@ def _add_investments(db):
         )
 
 
+def test_list_connections_shows_only_the_last_four_characters(db):
+    with db.write() as cur:
+        cur.execute("UPDATE accounts SET number = '0001/12345-6' WHERE id = 'acc-main'")
+    out = {c["alias"]: c for c in list_connections(db)}
+    numbers = {a["id"]: a["number"] for a in out["main"]["accounts"]}
+    assert numbers == {"acc-main": "****3456", "card-main": None}
+    with db.write() as cur:
+        cur.execute("UPDATE accounts SET number = ' -/ ' WHERE id = 'acc-main'")
+    out = {c["alias"]: c for c in list_connections(db)}
+    assert {a["id"]: a["number"] for a in out["main"]["accounts"]}["acc-main"] is None
+
+
 def test_list_connections_has_accounts_history_and_hints(db):
     out = {c["alias"]: c for c in list_connections(db)}
     main = out["main"]

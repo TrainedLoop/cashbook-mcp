@@ -55,6 +55,8 @@ export interface FoundItem extends Omit<ItemPreview, "bank"> {
   bank: string | null;
   alias: string | null;
   error: string | null;
+  /** A stored connection to the same bank: adding this one too may count its money twice. */
+  same_bank_as?: string | null;
 }
 export interface DisconnectImpact {
   alias: string;
@@ -148,32 +150,6 @@ export const api = {
   server: () => call<ServerInfo>("GET", "/admin/api/server"),
   logout: () => call<{ signed_out: boolean }>("POST", "/admin/auth/logout"),
 };
-
-const PLUGGY_API = "https://api.pluggy.ai";
-const ITEM_ID_RE = /^[A-Za-z0-9-]{1,64}$/;
-
-/**
- * The MeuPluggy items that already exist for this application. Pluggy does not list items on
- * personal accounts, but a connect token issued with avoidDuplicates refuses a second MeuPluggy
- * item and names the existing ones; this asks for one and reads the refusal. Call it only once an
- * item is known to exist (after the widget succeeded or was refused): with none, Pluggy would
- * create a pending item. Any other answer gives an empty list.
- */
-export async function existingItemIds(connectToken: string, connectorId: number): Promise<string[]> {
-  try {
-    const res = await fetch(`${PLUGGY_API}/items`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "X-API-KEY": connectToken },
-      body: JSON.stringify({ connectorId, parameters: {} }),
-    });
-    if (res.status !== 400) return [];
-    const data = (await res.json()) as { codeDescription?: unknown; data?: { items?: unknown } } | null;
-    const items = data?.codeDescription === "ITEM_USER_ALREADY_EXISTS" ? data.data?.items : null;
-    return Array.isArray(items) ? items.filter((i): i is string => typeof i === "string" && ITEM_ID_RE.test(i)) : [];
-  } catch {
-    return [];
-  }
-}
 
 export const ALIAS_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 

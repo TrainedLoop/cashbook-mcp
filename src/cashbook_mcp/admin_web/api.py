@@ -568,14 +568,15 @@ def admin_routes(ctx: AdminContext) -> list[Route]:
     # --- API: mutations ---------------------------------------------------------------------
 
     async def connect_token(request: Request) -> Response:
-        """A Connect widget token. Aliases are chosen afterwards, one per item found. With
-        avoidDuplicates, Pluggy refuses a new MeuPluggy item once one exists and lists the existing
-        ones; the SPA reads that list and sends it to discover."""
+        """A Connect widget token. MeuPluggy authorizes one bank per widget run, each as its own
+        item under the same MeuPluggy login, so no avoidDuplicates: with it Pluggy refuses every
+        bank after the first (ITEM_USER_ALREADY_EXISTS). The SPA sends the new item to discover
+        and the owner picks its alias."""
         s = checked_mutation(request, ctx)
         if isinstance(s, Response):
             return s
         try:
-            token = await ctx.pluggy.create_connect_token({"avoidDuplicates": True})
+            token = await ctx.pluggy.create_connect_token({})
         except PluggyError as exc:
             log.warning("admin connect token failed status=%s", exc.status)
             return _error("pluggy_unavailable", 502)
@@ -617,12 +618,13 @@ def admin_routes(ctx: AdminContext) -> list[Route]:
             return _error("bad_request", 400)
         if not all(isinstance(i, str) and _ITEM_ID.fullmatch(i) for i in ids):
             return _error("item_unknown", 422)
-        stored = {c.item_id: c.alias for c in await asyncio.to_thread(ctx.syncer.connections)}
+        conns = await asyncio.to_thread(ctx.syncer.connections)
+        stored = {c.item_id: c.alias for c in conns}
         items = []
         for item_id in dict.fromkeys(ids):
             entry: dict[str, Any] = {
                 "item_id": item_id, "bank": None, "status": None, "accounts": [],
-                "alias": stored.get(item_id), "error": None,
+                "alias": stored.get(item_id), "error": None, "same_bank_as": None,
             }  # fmt: skip
             try:
                 entry |= dataclasses.asdict(await ctx.syncer.preview(item_id)) | {"item_id": item_id}
@@ -631,6 +633,11 @@ def admin_routes(ctx: AdminContext) -> list[Route]:
             except PluggyError as exc:
                 log.warning("admin discover failed status=%s", exc.status)
                 entry["error"] = "pluggy_unavailable"
+            # A bank authorized again can get a new item id: warn before it is stored twice.
+            if entry["alias"] is None and entry["bank"]:
+                entry["same_bank_as"] = next(
+                    (c.alias for c in conns if c.connector_name == entry["bank"]), None
+                )
             items.append(entry)
         return _json({"items": items})
 

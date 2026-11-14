@@ -1,3 +1,4 @@
+import dataclasses
 import logging
 from importlib.metadata import version
 
@@ -381,8 +382,8 @@ def test_discover_previews_each_item_and_marks_stored_ones(env):
     }
     assert resp.json() == {
         "items": [
-            {**preview, "item_id": "item-9", "alias": None},
-            {**preview, "item_id": "item-1", "alias": "main"},
+            {**preview, "item_id": "item-9", "alias": None, "same_bank_as": None},
+            {**preview, "item_id": "item-1", "alias": "main", "same_bank_as": None},
         ]
     }
     assert env.syncer.calls == [("preview", "item-9"), ("preview", "item-1")]
@@ -398,9 +399,20 @@ def test_discover_reports_errors_per_item(env, error, code):
     resp = env.send("POST", "/admin/api/connections/discover", {"item_ids": ["item-9"]})
     assert resp.status_code == 200
     assert resp.json() == {
-        "items": [{"item_id": "item-9", "bank": None, "status": None, "accounts": [], "alias": None, "error": code}]
+        "items": [{"item_id": "item-9", "bank": None, "status": None, "accounts": [], "alias": None, "error": code, "same_bank_as": None}]
     }
     assert "secrets" not in resp.text
+
+
+def test_discover_flags_a_bank_that_is_already_connected(env):
+    # Authorizing a bank again can give it a new item id; storing it may count the money twice.
+    env.login()
+    env.syncer.preview_result = dataclasses.replace(env.syncer.preview_result, bank="Bank")
+    resp = env.send("POST", "/admin/api/connections/discover", {"item_ids": ["item-1", "item-9"]})
+    assert resp.status_code == 200
+    by_id = {i["item_id"]: i for i in resp.json()["items"]}
+    assert by_id["item-1"]["alias"] == "main" and by_id["item-1"]["same_bank_as"] is None
+    assert by_id["item-9"]["same_bank_as"] == "main"
 
 
 @pytest.mark.parametrize("body", [{}, {"item_ids": []}, {"item_ids": "item-9"}, {"item_ids": ["a"] * 21}])
@@ -426,7 +438,9 @@ def test_connect_token_issues_token_restricted_to_meupluggy(env):
     resp = env.send("POST", "/admin/api/connect-token")
     assert resp.status_code == 200
     assert resp.json() == {"accessToken": "connect-token-1", "connectorIds": [200]}
-    assert env.pluggy.calls == [{"avoidDuplicates": True}]
+    # No avoidDuplicates: MeuPluggy needs one authorization (one item) per bank, all under the
+    # same login, and the option refuses every bank after the first.
+    assert env.pluggy.calls == [{}]
 
 
 def test_connect_token_pluggy_error_is_generic(env):

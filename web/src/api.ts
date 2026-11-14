@@ -18,7 +18,20 @@ export interface Account {
   type: string;
   subtype: string | null;
   name: string;
+  number?: string | null;
   purpose?: Purpose;
+}
+
+const SUBTYPES: Record<string, string> = {
+  CHECKING_ACCOUNT: "Checking",
+  SAVINGS_ACCOUNT: "Savings",
+  CREDIT_CARD: "Credit card",
+};
+
+/** Name plus kind and masked number: some banks give every account the same name. */
+export function accountLabel(a: Account): string {
+  const kind = a.subtype ? (SUBTYPES[a.subtype] ?? null) : null;
+  return [a.name, kind, a.number].filter(Boolean).join(" · ");
 }
 export type Role = "personal" | "business";
 export type Purpose = "regular" | "investment";

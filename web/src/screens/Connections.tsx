@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, errorMessage, type Connection, type Purpose, type Role } from "../api";
+import { accountLabel, api, errorMessage, type Connection, type Purpose, type Role } from "../api";
 import DisconnectDialog from "../components/DisconnectDialog";
 import { formatTime } from "../components/ServerFooter";
 import StatusBadge from "../components/StatusBadge";
@@ -128,12 +128,12 @@ export default function Connections({ disconnecting, onDisconnect, onConnect, on
                 <ul className="accounts">
                   {c.accounts.map((a) => (
                     <li key={a.id}>
-                      {a.name}
+                      {accountLabel(a)}
                       {a.type === "BANK" && (
                         <label className="field">
                           <span>Account type</span>
                           <select
-                            aria-label={`Account type for ${a.name}`}
+                            aria-label={`Account type for ${accountLabel(a)}`}
                             value={a.purpose ?? "regular"}
                             disabled={saving.has(`purpose:${a.id}`)}
                             aria-invalid={!!fieldErrors[`purpose:${a.id}`]}

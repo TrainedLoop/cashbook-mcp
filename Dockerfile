@@ -2,7 +2,7 @@
 
 # Stage 1: build the admin SPA. vite writes to ../src/cashbook_mcp/admin_web/static,
 # which resolves to /build/src/cashbook_mcp/admin_web/static from /build/web.
-FROM node:24-slim@sha256:01d566e8d94d8c619591d78652babfccd3c6992a3dffa9ed5ab39e11cf6c70e9 AS web
+FROM node:26-slim@sha256:e6bedef217677b276c591795e169840edd9096dbf13f29df8ef8d1856b8820bc AS web
 WORKDIR /build/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci

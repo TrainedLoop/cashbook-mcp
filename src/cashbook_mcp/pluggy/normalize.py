@@ -3,7 +3,11 @@
 from datetime import date
 from decimal import Decimal
 
-from cashbook_mcp.content import apply_text_policy
+from cashbook_mcp.content import (
+    apply_text_policy,
+    prepare_delimited,
+    prepare_identifier,
+)
 from cashbook_mcp.models import (
     Account,
     Bill,
@@ -50,10 +54,10 @@ def _account(alias: str, a: dict) -> Account:
         alias=alias,
         item_id=a.get("itemId") or "",
         type=a["type"],
-        subtype=a.get("subtype") or "",
-        name=a.get("name") or "",
-        number=a.get("number"),
-        owner_tax_id=_doc(a.get("taxNumber")),
+        subtype=prepare_identifier(a.get("subtype")) or "",
+        name=prepare_delimited(a.get("name")) or "",
+        number=prepare_identifier(a.get("number")),
+        owner_tax_id=prepare_identifier(_doc(a.get("taxNumber"))),
         balance=_req_dec(a.get("balance")),
         currency=a.get("currencyCode") or "BRL",
         credit_limit=_dec(credit.get("creditLimit")),
@@ -146,12 +150,12 @@ def normalize_snapshot(
             id=i["id"],
             alias=alias,
             item_id=i.get("itemId") or "",
-            type=i.get("type") or "",
-            name=i.get("name") or "",
+            type=prepare_identifier(i.get("type")) or "",
+            name=prepare_delimited(i.get("name")) or "",
             balance=_req_dec(i.get("balance")),
             currency=i.get("currencyCode") or "BRL",
             due_date=_date(i.get("dueDate")),
-            issuer=i.get("issuer"),
+            issuer=prepare_delimited(i.get("issuer")),
         )
         for i in investments
     ]
@@ -162,8 +166,8 @@ def normalize_snapshot(
             investment_id=inv_id,
             date=_date(r["date"]),  # type: ignore[arg-type]
             trade_date=_date(r.get("tradeDate")),
-            type=r.get("type") or "",
-            movement_type=r.get("movementType"),
+            type=prepare_identifier(r.get("type")) or "",
+            movement_type=prepare_identifier(r.get("movementType")),
             quantity=_dec(r.get("quantity")),
             value=_dec(r.get("value")),
             amount=_req_dec(r.get("amount")),
@@ -179,7 +183,7 @@ def normalize_snapshot(
                 id=ln["id"],
                 alias=alias,
                 item_id=ln.get("itemId") or "",
-                product_name=ln.get("productName"),
+                product_name=prepare_delimited(ln.get("productName")),
                 contract_amount=_dec(ln.get("contractAmount")),
                 outstanding_balance=_dec(ln.get("outstandingBalance")),
                 currency=ln.get("currencyCode") or "BRL",

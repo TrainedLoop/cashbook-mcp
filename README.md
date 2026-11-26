@@ -10,7 +10,7 @@ An MCP server, read-only toward your banks, that syncs your bank accounts, cards
 - Keeps the history it has seen in one DuckDB file encrypted with a key that never sits next to the data. Pluggy only provides a limited window; yours keeps growing.
 - Classifies transactions (spending, income, internal transfers, card bill payments) so totals are not double counted, with personal, business and consolidated scopes for owners who run a company.
 - Tracks net worth from daily balance snapshots, forecasts cash for the next 30 to 90 days and reports changes in recurring charges.
-- Lets the assistant fix a classification after asking you: journaled, capped and reversible.
+- Lets the assistant fix a classification after asking you: journaled, capped and reversible (undo puts back the label the transaction had before the batch).
 - Offers an owner page at `/admin` to connect banks with MeuPluggy, set each connection's role and each account's purpose, reload and disconnect.
 - One owner per instance: only Google logins in `ALLOWED_EMAILS` get a token or an admin session.
 
@@ -45,7 +45,7 @@ Prompts: `monthly_review`, `subscriptions_audit`, `upcoming_bills`, `review_clas
 - Locally there is one write path: the assistant can set the kind and/or category of specific transactions. Every change is journaled, reversible and capped per day.
 - Only a verified Google login listed in `ALLOWED_EMAILS` can use the connector or `/admin`.
 - `query_sql` allows one `SELECT`/`WITH` statement, parsed by DuckDB, on a locked-down reader connection: no files, network, extensions, `ATTACH` or writes. 10 s timeout, 1,000 rows.
-- Transaction text is written by third parties (anyone can send you a PIX with a message). It is cleaned, capped and wrapped in untrusted markers when suspicious, and the tool descriptions say it is data, not instructions.
+- Transaction text is written by third parties (anyone can send you a PIX with a message). It is cleaned, capped and always wrapped in untrusted markers (marked suspicious when a heuristic also flags it), and the tool descriptions say it is data, not instructions.
 - The database file is encrypted; the key lives in `secrets/db.key`, outside the data volume.
 - It does not defend against a shell on the host. See [SECURITY.md](SECURITY.md) and [docs/architecture.md](docs/architecture.md).
 

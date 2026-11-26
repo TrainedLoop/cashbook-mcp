@@ -5,6 +5,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from cashbook_mcp.content import delimit
 from cashbook_mcp.pluggy.client import PluggyError
 from cashbook_mcp.store.db import Database
 from cashbook_mcp.store.sync import (
@@ -197,7 +198,7 @@ async def test_first_load_inserts(syncer, fake, db):
     conn = await syncer.add_connection("a", "item-a")
 
     assert conn.alias == "a" and conn.item_id == "item-a"
-    assert conn.connector_name == "Checking"
+    assert conn.connector_name == delimit("Checking")
     assert conn.status == "UPDATED"
     assert conn.last_updated_at == datetime(2026, 11, 5, 9, 0)
     assert conn.last_synced_at == datetime(2026, 11, 6, 15, 0)
@@ -458,10 +459,10 @@ async def test_load_refreshes_the_bank_name_but_keeps_it_without_accounts(syncer
     await syncer.add_connection("a", "item-a")
     fake.accounts["item-a"][0]["name"] = "Renamed Bank"
     await syncer.load("a")
-    assert syncer.connections()[0].connector_name == "Renamed Bank"
+    assert syncer.connections()[0].connector_name == delimit("Renamed Bank")
     fake.accounts["item-a"] = []
     await syncer.load("a")
-    assert syncer.connections()[0].connector_name == "Renamed Bank"
+    assert syncer.connections()[0].connector_name == delimit("Renamed Bank")
 
 
 async def test_add_connection_without_load_stores_only_the_connection(syncer, fake, db):
@@ -471,7 +472,7 @@ async def test_add_connection_without_load_stores_only_the_connection(syncer, fa
 
     assert conn.alias == "a" and conn.last_synced_at is None
     assert fake.calls == [("get_item", "item-a"), ("list_accounts", "item-a")]  # no data fetched yet
-    assert conn.connector_name == "Checking"
+    assert conn.connector_name == delimit("Checking")
     assert alias_counts(db, "a")["transactions"] == 0
     assert alias_counts(db, "a")["connections"] == 1
     assert (await syncer.load("a")).outcome == "ok"

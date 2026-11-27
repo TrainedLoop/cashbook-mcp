@@ -63,6 +63,27 @@ def prepare_identifier(s: str | None) -> str | None:
     return s[:MAX_IDENTIFIER_CHARS]
 
 
+_CODE = re.compile(r"[A-Z0-9_]{1,32}")
+
+
+def prepare_code(s: str | None) -> str | None:
+    """Enum-like code (status, error code, currency): ^[A-Z0-9_]{1,32}$.
+    Anything else becomes None."""
+    s = prepare_identifier(s)
+    return s if s is not None and _CODE.fullmatch(s) else None
+
+
+UNKNOWN_CURRENCY = "XXX"  # ISO 4217 "no currency": never BRL, so v_flows keeps it out of the BRL totals
+
+
+def prepare_currency(s: str | None, default: str = "BRL") -> str:
+    """Currency code: absent gives `default`; a malformed one gives UNKNOWN_CURRENCY, never `default`,
+    so a foreign amount is not passed off as BRL."""
+    if s is None or s == "":
+        return default
+    return prepare_code(s) or UNKNOWN_CURRENCY
+
+
 def unwrap(s: str | None) -> str | None:
     """Remove delimiting markers added by delimit()/wrap_suspicious()."""
     return None if s is None else _WRAPPER.sub("", s)

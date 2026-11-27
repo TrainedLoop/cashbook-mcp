@@ -302,6 +302,23 @@ def _drop_legacy(cur, change_id: str) -> list[str]:
     return touched
 
 
+def _superseded(cur, change_id: str, tid: str) -> bool:
+    """Whether a newer, still-standing batch also changed the category of this transaction.
+
+    A dropping batch leaves no row to point at, so ownership of "no override" is decided by order (insertion order breaks timestamp ties; ids are random)."""
+    return (
+        cur.execute(
+            "SELECT 1 FROM classification_change_items i "
+            "JOIN classification_changes c ON c.change_id = i.change_id "
+            "JOIN classification_changes me ON me.change_id = ? "
+            "WHERE i.transaction_id = ? AND i.category_changed AND c.undone_at IS NULL "
+            "AND i.change_id <> ? AND (c.created_at, c.rowid) > (me.created_at, me.rowid) LIMIT 1",
+            [change_id, tid, change_id],
+        ).fetchone()
+        is not None
+    )
+
+
 def _restore(cur, change_id: str, items: list[tuple]) -> list[str]:
     """Put back, for each transaction the batch still owns, the manual label it replaced."""
     reverted: list[str] = []
@@ -328,7 +345,9 @@ def _restore(cur, change_id: str, items: list[tuple]) -> list[str]:
                 "SELECT change_id FROM category_overrides WHERE transaction_id = ?", [tid]
             ).fetchone()
             # A batch that set the provider's own category dropped the override: no row means it stands.
-            if (owner is not None and owner[0] == change_id) or (owner is None and c_dropped):
+            if (owner is not None and owner[0] == change_id) or (
+                owner is None and c_dropped and not _superseded(cur, change_id, tid)
+            ):
                 touched = True
                 old, cid = _previous(cur, change_id, tid, "category", old_c, old_c_cid)
                 if old is None or alias is None:

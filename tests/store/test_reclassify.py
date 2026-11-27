@@ -311,3 +311,45 @@ def test_undo_of_a_batch_without_journal_items_still_drops_its_overrides(db):
         cur.execute("DELETE FROM classification_change_items")
     assert undo(db, out["change_id"], now=NOW)["reverted"] == 2
     assert kind_override(db, "t-1") is None
+
+
+def _category(db, tid="t-1"):
+    r = db.read()
+    try:
+        return r.execute("SELECT category, change_id FROM category_overrides WHERE transaction_id = ?", [tid]).fetchone()
+    finally:
+        r.close()
+
+
+def _cat(db, category, now):
+    return reclassify(db, ["t-1"], None, None, category=category, now=now, tz=TZ, daily_cap=1000, tool_names=TOOLS)
+
+
+def test_undo_of_a_superseded_dropping_batch_does_not_resurrect_an_old_label(db):
+    with db.write() as c:
+        c.execute("UPDATE transactions SET pluggy_category = 'Groceries' WHERE id = 't-1'")
+    a = _cat(db, "Rent", NOW)
+    b = _cat(db, "Groceries", NOW + timedelta(minutes=1))  # drops the override
+    c3 = _cat(db, "Education", NOW + timedelta(minutes=2))
+    d = _cat(db, "Groceries", NOW + timedelta(minutes=3))  # drops it again
+    assert _category(db) is None
+
+    assert undo(db, b["change_id"], now=NOW)["reverted"] == 0  # D, newer, owns "no override"
+    assert _category(db) is None
+    assert undo(db, d["change_id"], now=NOW)["reverted"] == 1  # now C's label comes back
+    assert _category(db) == ("Education", c3["change_id"])
+    assert a["change_id"] != c3["change_id"]
+
+
+def test_undo_of_a_legacy_dropping_batch_does_not_overwrite_a_newer_batch(db):
+    with db.write() as c:
+        c.execute("UPDATE transactions SET pluggy_category = 'Groceries' WHERE id = 't-1'")
+    _cat(db, "Rent", NOW)
+    old = _cat(db, "Groceries", NOW + timedelta(minutes=1))  # dropped the override
+    with db.write() as cur:  # the old batch predates the item journal
+        cur.execute("DELETE FROM classification_change_items WHERE change_id = ?", [old["change_id"]])
+    new = _cat(db, "Education", NOW + timedelta(minutes=2))  # post-0007 batch
+    assert _category(db) == ("Education", new["change_id"])
+
+    assert undo(db, old["change_id"], now=NOW)["reverted"] == 0
+    assert _category(db) == ("Education", new["change_id"])

@@ -5,6 +5,7 @@ from decimal import Decimal
 
 from cashbook_mcp.content import (
     apply_text_policy,
+    prepare_currency,
     prepare_delimited,
     prepare_identifier,
 )
@@ -59,7 +60,7 @@ def _account(alias: str, a: dict) -> Account:
         number=prepare_identifier(a.get("number")),
         owner_tax_id=prepare_identifier(_doc(a.get("taxNumber"))),
         balance=_req_dec(a.get("balance")),
-        currency=a.get("currencyCode") or "BRL",
+        currency=prepare_currency(a.get("currencyCode")),
         credit_limit=_dec(credit.get("creditLimit")),
         available_credit=_dec(credit.get("availableCreditLimit")),
     )
@@ -67,7 +68,7 @@ def _account(alias: str, a: dict) -> Account:
 
 def _transaction(alias: str, account: Account, t: dict) -> Transaction:
     sign = CARD_AMOUNT_SIGN if account.type == "CREDIT" else 1
-    tx_currency = t.get("currencyCode") or account.currency
+    tx_currency = prepare_currency(t.get("currencyCode"), account.currency)
     foreign = tx_currency != account.currency
     in_account = t.get("amountInAccountCurrency")
     if foreign and in_account is None:
@@ -140,7 +141,7 @@ def normalize_snapshot(
             closing_date=_date(b.get("closeDate") or b.get("closingDate")),
             total_amount=_req_dec(b.get("totalAmount")),
             minimum_payment=_dec(b.get("minimumPaymentAmount")),
-            currency=b.get("totalAmountCurrencyCode") or "BRL",
+            currency=prepare_currency(b.get("totalAmountCurrencyCode")),
         )
         for acc_id, rows in bills.items()
         for b in rows
@@ -153,7 +154,7 @@ def normalize_snapshot(
             type=prepare_identifier(i.get("type")) or "",
             name=prepare_delimited(i.get("name")) or "",
             balance=_req_dec(i.get("balance")),
-            currency=i.get("currencyCode") or "BRL",
+            currency=prepare_currency(i.get("currencyCode")),
             due_date=_date(i.get("dueDate")),
             issuer=prepare_delimited(i.get("issuer")),
         )
@@ -186,7 +187,7 @@ def normalize_snapshot(
                 product_name=prepare_delimited(ln.get("productName")),
                 contract_amount=_dec(ln.get("contractAmount")),
                 outstanding_balance=_dec(ln.get("outstandingBalance")),
-                currency=ln.get("currencyCode") or "BRL",
+                currency=prepare_currency(ln.get("currencyCode")),
                 installments_total=inst.get("totalInstallments"),
                 installments_remaining=inst.get("dueInstallments"),
                 next_due_date=_date(ln.get("nextDueDate")),

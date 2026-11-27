@@ -22,7 +22,13 @@ import duckdb
 
 from cashbook_mcp.analysis.filters import today_in
 from cashbook_mcp.classify import classify
-from cashbook_mcp.content import delimit, prepare_delimited, prepare_text, unwrap
+from cashbook_mcp.content import (
+    delimit,
+    prepare_code,
+    prepare_delimited,
+    prepare_text,
+    unwrap,
+)
 from cashbook_mcp.models import (
     PURPOSES,
     ROLES,
@@ -160,9 +166,9 @@ def _stored_bank_name(item: dict, accounts: list[tuple[Any, Any]]) -> str:
 def _status_fields(item: dict) -> dict[str, Any]:
     error = item.get("error") or {}
     return {
-        "status": item.get("status"),
-        "execution_status": item.get("executionStatus"),
-        "error_code": error.get("code"),
+        "status": prepare_code(item.get("status")),
+        "execution_status": prepare_code(item.get("executionStatus")),
+        "error_code": prepare_code(error.get("code")),
         "error_message": prepare_delimited(error.get("message")),
         "consent_expires_at": _parse_ts(item.get("consentExpiresAt")),
         "next_auto_sync_at": _parse_ts(item.get("nextAutoSyncAt")),

@@ -7,7 +7,7 @@ from itertools import pairwise
 from statistics import median
 from typing import Literal
 
-from cashbook_mcp.content import MARK_CLOSE, MARK_OPEN, wrap_suspicious
+from cashbook_mcp.content import MARK_CLOSE, MARK_OPEN, MARK_UNTRUSTED, delimit
 from cashbook_mcp.store.db import Database
 
 from .filters import INTERNAL_KINDS, jsonable, months_ago
@@ -20,7 +20,7 @@ _TOLERANCE = Decimal("0.15")
 _RANK = {"high": 0, "medium": 1, "low": 2}
 _HIGH_CADENCES = ((6, 8), (27, 33), (360, 370))
 _MARKERS = re.compile(
-    "|".join(re.escape(m) for m in (MARK_OPEN, MARK_CLOSE)), re.IGNORECASE
+    "|".join(re.escape(m) for m in (MARK_OPEN, MARK_UNTRUSTED, MARK_CLOSE)), re.IGNORECASE
 )
 _NOISE = re.compile(r"[\d*]+")
 
@@ -132,7 +132,7 @@ def find_recurring(
         typical, cadence, last = stats["typical"], stats["cadence"], stats["last"]
         items.append(
             {
-                "key": wrap_suspicious(key) if (key, direction) in flagged else key,
+                "key": delimit(key, (key, direction) in flagged),
                 "direction": direction,
                 "typical_amount": jsonable(typical.quantize(_CENT)),
                 "cadence_days": cadence,
@@ -170,7 +170,7 @@ def recurring_changes(
     changes: list[dict] = []
     for (key, direction), rows in groups.items():
         rows = sorted(rows, key=lambda r: (r[1], r[0]))
-        shown = wrap_suspicious(key) if (key, direction) in flagged else key
+        shown = delimit(key, (key, direction) in flagged)
         base = {"key": shown, "direction": direction}
 
         # Duplicates only matter inside a recurring outflow series: the later of two equal

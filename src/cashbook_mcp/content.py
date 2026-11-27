@@ -1,8 +1,12 @@
 """Handling of untrusted third-party text (bank descriptions, counterpart names).
 
-Sanitizing (invisible characters, marker characters, length cap), delimiting
-(suspicion markers) and heuristic suspicion flags. The flags are an aid, not a
-guarantee.
+Sanitizing (invisible characters, marker characters, length cap), delimiting and
+heuristic suspicion flags. Every free-text field of third-party origin is delimited
+unconditionally between MARK_UNTRUSTED and MARK_CLOSE; MARK_OPEN (the ":suspicious"
+variant) is used instead of MARK_UNTRUSTED only when a heuristic also flags the text.
+Delimiting never depends on the heuristic, which is an aid, not a guarantee.
+Identifier-like fields (tax ids, account numbers, category and type codes) carry
+program logic, so they are sanitized and length-capped but not delimited.
 """
 
 import re
@@ -10,6 +14,7 @@ from dataclasses import replace
 
 from cashbook_mcp.models import Transaction
 
+MARK_UNTRUSTED = "\u27e6untrusted\u27e7"
 MARK_OPEN = "\u27e6untrusted:suspicious\u27e7"
 MARK_CLOSE = "\u27e6/untrusted\u27e7"
 MAX_TEXT_CHARS = 500
@@ -37,6 +42,51 @@ def clean_text(s: str) -> str:
     s = s.replace("\r\n", "\n").replace("\r", "\n")
     s = _INVISIBLE.sub("", s)
     return _BLANK_RUNS.sub("\n\n", s)
+
+
+MAX_IDENTIFIER_CHARS = 64
+_IDENTIFIER_DROP = re.compile(r"\s+")
+_WRAPPER = re.compile(
+    "|".join(re.escape(m) for m in (MARK_OPEN, MARK_UNTRUSTED, MARK_CLOSE)), re.IGNORECASE
+)
+
+
+def prepare_identifier(s: str | None) -> str | None:
+    """Clean an identifier-like third-party value (tax id, account number, category or type
+    code): no invisible/marker characters, no whitespace runs, length cap."""
+    if s is None:
+        return None
+    s = clean_text(str(s)).replace("\u27e6", "").replace("\u27e7", "")
+    s = _WHITESPACE.sub(" ", s).strip()
+    if not s:
+        return None
+    return s[:MAX_IDENTIFIER_CHARS]
+
+
+_CODE = re.compile(r"[A-Z0-9_]{1,32}")
+
+
+def prepare_code(s: str | None) -> str | None:
+    """Enum-like code (status, error code, currency): ^[A-Z0-9_]{1,32}$.
+    Anything else becomes None."""
+    s = prepare_identifier(s)
+    return s if s is not None and _CODE.fullmatch(s) else None
+
+
+UNKNOWN_CURRENCY = "XXX"  # ISO 4217 "no currency": never BRL, so v_flows keeps it out of the BRL totals
+
+
+def prepare_currency(s: str | None, default: str = "BRL") -> str:
+    """Currency code: absent gives `default`; a malformed one gives UNKNOWN_CURRENCY, never `default`,
+    so a foreign amount is not passed off as BRL."""
+    if s is None or s == "":
+        return default
+    return prepare_code(s) or UNKNOWN_CURRENCY
+
+
+def unwrap(s: str | None) -> str | None:
+    """Remove delimiting markers added by delimit()/wrap_suspicious()."""
+    return None if s is None else _WRAPPER.sub("", s)
 
 
 def prepare_text(s: str | None) -> str | None:
@@ -98,6 +148,17 @@ def wrap_suspicious(s: str) -> str:
     return f"{MARK_OPEN}{s}{MARK_CLOSE}"
 
 
+def delimit(s: str, suspicious: bool = False) -> str:
+    """Wrap already-prepared third-party text between markers (always; never conditional)."""
+    return wrap_suspicious(s) if suspicious else f"{MARK_UNTRUSTED}{s}{MARK_CLOSE}"
+
+
+def prepare_delimited(s: str | None, suspicious: bool = False) -> str | None:
+    """prepare_text() then delimit(); None when nothing is left."""
+    text = prepare_text(unwrap(s))
+    return None if text is None else delimit(text, suspicious)
+
+
 def has_marker(value: object) -> bool:
     """True if value is a string carrying the suspicion marker (case-insensitive,
     so values passed through SQL upper()/lower() are still detected)."""
@@ -105,20 +166,25 @@ def has_marker(value: object) -> bool:
 
 
 def apply_text_policy(t: Transaction, tool_names: frozenset[str]) -> Transaction:
-    """Prepare the free-text fields and wrap them in markers when they look suspicious."""
+    """Prepare every third-party text field of a transaction. Free text (description, counterpart
+    and merchant names) is always delimited, as ":suspicious" when the heuristic flags any of it;
+    identifier-like fields are sanitized."""
     description = prepare_text(t.description) or ""
     counterpart = prepare_text(t.counterpart_name)
     merchant = prepare_text(t.merchant_name)
-    reasons = suspicion_reasons([description, counterpart, merchant], tool_names)
-    if reasons:
-        description = wrap_suspicious(description) if description else description
-        counterpart = wrap_suspicious(counterpart) if counterpart else counterpart
-        merchant = wrap_suspicious(merchant) if merchant else merchant
+    reasons = suspicion_reasons(
+        [description, counterpart, merchant, prepare_text(t.pluggy_category)], tool_names
+    )
+    flagged = bool(reasons)
     return replace(
         t,
-        description=description,
-        counterpart_name=counterpart,
-        merchant_name=merchant,
-        text_suspicious=bool(reasons),
+        description=delimit(description, flagged) if description else description,
+        counterpart_name=delimit(counterpart, flagged) if counterpart else counterpart,
+        merchant_name=delimit(merchant, flagged) if merchant else merchant,
+        counterpart_tax_id=prepare_identifier(t.counterpart_tax_id),
+        counterpart_account_number=prepare_identifier(t.counterpart_account_number),
+        pluggy_category=prepare_identifier(t.pluggy_category),
+        payment_method=prepare_identifier(t.payment_method),
+        text_suspicious=flagged,
         suspicion_reasons=tuple(reasons),
     )

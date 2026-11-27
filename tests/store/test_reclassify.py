@@ -248,3 +248,108 @@ def test_reclassify_and_undo_never_stamp_older_than_existing_changes(db):
         cur.execute("UPDATE transactions SET changed_at = ? WHERE id = 't-4'", [future + timedelta(days=1)])
     undo(db, out["change_id"], now=NOW)
     assert changed_at(db, "t-1") == future + timedelta(days=1)
+
+
+def kind_override(db, tid):
+    cur = db.read()
+    try:
+        return cur.execute(
+            "SELECT kind, change_id FROM classification_overrides WHERE transaction_id = ?", [tid]
+        ).fetchone()
+    finally:
+        cur.close()
+
+
+def test_undo_restores_the_previous_manual_kind_not_the_automatic_one(db):
+    a = run(db, ["t-1"], kind="refund")
+    b = run(db, ["t-1"], kind="income")
+    assert kind_override(db, "t-1") == ("income", b["change_id"])
+    assert undo(db, b["change_id"], now=NOW)["reverted"] == 1
+    assert state(db, "t-1") == ("refund", f"manual:{a['change_id']}")  # A's label, not auto
+    assert undo(db, a["change_id"], now=NOW)["reverted"] == 1  # A owns it again
+    kind, reason = state(db, "t-1")
+    assert kind == "purchase" and not reason.startswith("manual")
+
+
+def test_undo_skips_a_previous_batch_that_was_undone_meanwhile(db):
+    a = run(db, ["t-1"], kind="refund")
+    b = run(db, ["t-1"], kind="income")
+    assert undo(db, a["change_id"], now=NOW)["reverted"] == 0  # B owns it
+    assert undo(db, b["change_id"], now=NOW)["reverted"] == 1
+    kind, reason = state(db, "t-1")
+    assert kind == "purchase" and not reason.startswith("manual")  # A is undone: back to auto
+    assert kind_override(db, "t-1") is None
+
+
+def test_undo_restores_the_previous_manual_category(db):
+    with db.write() as c:
+        c.execute("UPDATE transactions SET pluggy_category = 'Groceries' WHERE id = 't-1'")
+    a = reclassify(db, ["t-1"], None, None, category="Rent", now=NOW, tz=TZ, daily_cap=1000, tool_names=TOOLS)
+    b = reclassify(db, ["t-1"], None, None, category="Education", now=NOW, tz=TZ, daily_cap=1000, tool_names=TOOLS)
+    # A third batch goes back to the provider's category, which drops the override.
+    c3 = reclassify(db, ["t-1"], None, None, category="Groceries", now=NOW, tz=TZ, daily_cap=1000, tool_names=TOOLS)
+
+    def category():
+        r = db.read()
+        try:
+            return r.execute("SELECT category, change_id FROM category_overrides WHERE transaction_id = 't-1'").fetchone()
+        finally:
+            r.close()
+
+    assert category() is None
+    assert undo(db, c3["change_id"], now=NOW)["reverted"] == 1
+    assert category() == ("Education", b["change_id"])  # the label before C, not the provider's
+    assert undo(db, b["change_id"], now=NOW)["reverted"] == 1
+    assert category() == ("Rent", a["change_id"])
+    assert undo(db, a["change_id"], now=NOW)["reverted"] == 1
+    assert category() is None
+
+
+def test_undo_of_a_batch_without_journal_items_still_drops_its_overrides(db):
+    out = run(db, ["t-1", "t-2"])
+    with db.write() as cur:  # a batch journaled before classification_change_items existed
+        cur.execute("DELETE FROM classification_change_items")
+    assert undo(db, out["change_id"], now=NOW)["reverted"] == 2
+    assert kind_override(db, "t-1") is None
+
+
+def _category(db, tid="t-1"):
+    r = db.read()
+    try:
+        return r.execute("SELECT category, change_id FROM category_overrides WHERE transaction_id = ?", [tid]).fetchone()
+    finally:
+        r.close()
+
+
+def _cat(db, category, now):
+    return reclassify(db, ["t-1"], None, None, category=category, now=now, tz=TZ, daily_cap=1000, tool_names=TOOLS)
+
+
+def test_undo_of_a_superseded_dropping_batch_does_not_resurrect_an_old_label(db):
+    with db.write() as c:
+        c.execute("UPDATE transactions SET pluggy_category = 'Groceries' WHERE id = 't-1'")
+    a = _cat(db, "Rent", NOW)
+    b = _cat(db, "Groceries", NOW + timedelta(minutes=1))  # drops the override
+    c3 = _cat(db, "Education", NOW + timedelta(minutes=2))
+    d = _cat(db, "Groceries", NOW + timedelta(minutes=3))  # drops it again
+    assert _category(db) is None
+
+    assert undo(db, b["change_id"], now=NOW)["reverted"] == 0  # D, newer, owns "no override"
+    assert _category(db) is None
+    assert undo(db, d["change_id"], now=NOW)["reverted"] == 1  # now C's label comes back
+    assert _category(db) == ("Education", c3["change_id"])
+    assert a["change_id"] != c3["change_id"]
+
+
+def test_undo_of_a_legacy_dropping_batch_does_not_overwrite_a_newer_batch(db):
+    with db.write() as c:
+        c.execute("UPDATE transactions SET pluggy_category = 'Groceries' WHERE id = 't-1'")
+    _cat(db, "Rent", NOW)
+    old = _cat(db, "Groceries", NOW + timedelta(minutes=1))  # dropped the override
+    with db.write() as cur:  # the old batch predates the item journal
+        cur.execute("DELETE FROM classification_change_items WHERE change_id = ?", [old["change_id"]])
+    new = _cat(db, "Education", NOW + timedelta(minutes=2))  # post-0007 batch
+    assert _category(db) == ("Education", new["change_id"])
+
+    assert undo(db, old["change_id"], now=NOW)["reverted"] == 0
+    assert _category(db) == ("Education", new["change_id"])

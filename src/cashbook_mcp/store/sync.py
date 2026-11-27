@@ -22,7 +22,13 @@ import duckdb
 
 from cashbook_mcp.analysis.filters import today_in
 from cashbook_mcp.classify import classify
-from cashbook_mcp.content import prepare_text
+from cashbook_mcp.content import (
+    delimit,
+    prepare_code,
+    prepare_delimited,
+    prepare_text,
+    unwrap,
+)
 from cashbook_mcp.models import (
     PURPOSES,
     ROLES,
@@ -141,7 +147,7 @@ def _bank_name(item: dict, accounts: list[tuple[Any, Any]]) -> str:
     """The bank behind an item, from (type, name) pairs of its accounts. Every MeuPluggy item has
     the MeuPluggy connector, so the connector name says nothing: the first checking account names
     the bank, else the first account, else the connector."""
-    names = [(kind, prepare_text(name)) for kind, name in accounts]
+    names = [(kind, prepare_text(unwrap(name))) for kind, name in accounts]
     for kind, name in names:
         if name and kind == "BANK":
             return name
@@ -151,13 +157,19 @@ def _bank_name(item: dict, accounts: list[tuple[Any, Any]]) -> str:
     return prepare_text((item.get("connector") or {}).get("name")) or ""
 
 
+def _stored_bank_name(item: dict, accounts: list[tuple[Any, Any]]) -> str:
+    """_bank_name as stored (and shown to the model): delimited as third-party text."""
+    bank = _bank_name(item, accounts)
+    return delimit(bank) if bank else bank
+
+
 def _status_fields(item: dict) -> dict[str, Any]:
     error = item.get("error") or {}
     return {
-        "status": item.get("status"),
-        "execution_status": item.get("executionStatus"),
-        "error_code": error.get("code"),
-        "error_message": prepare_text(error.get("message")),
+        "status": prepare_code(item.get("status")),
+        "execution_status": prepare_code(item.get("executionStatus")),
+        "error_code": prepare_code(error.get("code")),
+        "error_message": prepare_delimited(error.get("message")),
         "consent_expires_at": _parse_ts(item.get("consentExpiresAt")),
         "next_auto_sync_at": _parse_ts(item.get("nextAutoSyncAt")),
     }
@@ -345,7 +357,7 @@ class Syncer:
             [*status.values(), _parse_ts(snap.item.get("lastUpdatedAt")), now, snap.alias],
         )
         if snap.accounts:  # without accounts the stored name is better than the fallback
-            bank = _bank_name(snap.item, [(a.type, a.name) for a in snap.accounts])
+            bank = _stored_bank_name(snap.item, [(a.type, a.name) for a in snap.accounts])
             cur.execute("UPDATE connections SET connector_name = ? WHERE alias = ?", [bank, snap.alias])
         cur.execute(
             "INSERT INTO sync_runs (alias, started_at, finished_at, outcome, rows_upserted, "
@@ -544,7 +556,7 @@ class Syncer:
                 [
                     alias,
                     item_id,
-                    _bank_name(item, [(a.get("type"), a.get("name")) for a in accounts]),
+                    _stored_bank_name(item, [(a.get("type"), a.get("name")) for a in accounts]),
                     now,
                     *status.values(),
                     role,

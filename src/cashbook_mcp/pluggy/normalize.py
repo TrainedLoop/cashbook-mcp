@@ -3,7 +3,12 @@
 from datetime import date
 from decimal import Decimal
 
-from cashbook_mcp.content import apply_text_policy
+from cashbook_mcp.content import (
+    apply_text_policy,
+    prepare_currency,
+    prepare_delimited,
+    prepare_identifier,
+)
 from cashbook_mcp.models import (
     Account,
     Bill,
@@ -50,12 +55,12 @@ def _account(alias: str, a: dict) -> Account:
         alias=alias,
         item_id=a.get("itemId") or "",
         type=a["type"],
-        subtype=a.get("subtype") or "",
-        name=a.get("name") or "",
-        number=a.get("number"),
-        owner_tax_id=_doc(a.get("taxNumber")),
+        subtype=prepare_identifier(a.get("subtype")) or "",
+        name=prepare_delimited(a.get("name")) or "",
+        number=prepare_identifier(a.get("number")),
+        owner_tax_id=prepare_identifier(_doc(a.get("taxNumber"))),
         balance=_req_dec(a.get("balance")),
-        currency=a.get("currencyCode") or "BRL",
+        currency=prepare_currency(a.get("currencyCode")),
         credit_limit=_dec(credit.get("creditLimit")),
         available_credit=_dec(credit.get("availableCreditLimit")),
     )
@@ -63,7 +68,7 @@ def _account(alias: str, a: dict) -> Account:
 
 def _transaction(alias: str, account: Account, t: dict) -> Transaction:
     sign = CARD_AMOUNT_SIGN if account.type == "CREDIT" else 1
-    tx_currency = t.get("currencyCode") or account.currency
+    tx_currency = prepare_currency(t.get("currencyCode"), account.currency)
     foreign = tx_currency != account.currency
     in_account = t.get("amountInAccountCurrency")
     if foreign and in_account is None:
@@ -136,7 +141,7 @@ def normalize_snapshot(
             closing_date=_date(b.get("closeDate") or b.get("closingDate")),
             total_amount=_req_dec(b.get("totalAmount")),
             minimum_payment=_dec(b.get("minimumPaymentAmount")),
-            currency=b.get("totalAmountCurrencyCode") or "BRL",
+            currency=prepare_currency(b.get("totalAmountCurrencyCode")),
         )
         for acc_id, rows in bills.items()
         for b in rows
@@ -146,12 +151,12 @@ def normalize_snapshot(
             id=i["id"],
             alias=alias,
             item_id=i.get("itemId") or "",
-            type=i.get("type") or "",
-            name=i.get("name") or "",
+            type=prepare_identifier(i.get("type")) or "",
+            name=prepare_delimited(i.get("name")) or "",
             balance=_req_dec(i.get("balance")),
-            currency=i.get("currencyCode") or "BRL",
+            currency=prepare_currency(i.get("currencyCode")),
             due_date=_date(i.get("dueDate")),
-            issuer=i.get("issuer"),
+            issuer=prepare_delimited(i.get("issuer")),
         )
         for i in investments
     ]
@@ -162,8 +167,8 @@ def normalize_snapshot(
             investment_id=inv_id,
             date=_date(r["date"]),  # type: ignore[arg-type]
             trade_date=_date(r.get("tradeDate")),
-            type=r.get("type") or "",
-            movement_type=r.get("movementType"),
+            type=prepare_identifier(r.get("type")) or "",
+            movement_type=prepare_identifier(r.get("movementType")),
             quantity=_dec(r.get("quantity")),
             value=_dec(r.get("value")),
             amount=_req_dec(r.get("amount")),
@@ -179,10 +184,10 @@ def normalize_snapshot(
                 id=ln["id"],
                 alias=alias,
                 item_id=ln.get("itemId") or "",
-                product_name=ln.get("productName"),
+                product_name=prepare_delimited(ln.get("productName")),
                 contract_amount=_dec(ln.get("contractAmount")),
                 outstanding_balance=_dec(ln.get("outstandingBalance")),
-                currency=ln.get("currencyCode") or "BRL",
+                currency=prepare_currency(ln.get("currencyCode")),
                 installments_total=inst.get("totalInstallments"),
                 installments_remaining=inst.get("dueInstallments"),
                 next_due_date=_date(ln.get("nextDueDate")),

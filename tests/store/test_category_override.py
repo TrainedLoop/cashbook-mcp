@@ -114,10 +114,11 @@ def test_batches_do_not_erase_each_other(db):
     assert flow_row(db, "t-1")[0] == "Rent"
     assert undo(db, k2["change_id"], now=NOW)["reverted"] == 1
     assert flow_row(db, "t-1")[0] == "Rent"
+    assert one(db, "SELECT kind FROM v_flows WHERE id = 't-1'") == [("refund",)]  # k2 put k back
     assert undo(db, c["change_id"], now=NOW)["reverted"] == 1
     assert flow_row(db, "t-1")[:3] == ("Entrepreneurial activities", "Entrepreneurial activities", False)
-    assert one(db, "SELECT kind FROM v_flows WHERE id = 't-1'") == [("purchase",)]  # k2 replaced k
-    assert undo(db, k["change_id"], now=NOW)["reverted"] == 0
+    assert undo(db, k["change_id"], now=NOW)["reverted"] == 1
+    assert one(db, "SELECT kind FROM v_flows WHERE id = 't-1'") == [("purchase",)]
 
 
 def test_undo_removes_only_its_category_overrides(db):
